@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=GitHub Desktop Linux Enhanced
+GenericName=Git client
+Comment=Commit, branch, push and pull your repositories
+Exec=github-desktop-enhanced
+Icon=github-desktop-enhanced
+Terminal=false
+Categories=Development;RevisionControl;
+Keywords=git;github;commit;branch;
+StartupWMClass=github-desktop-enhanced
+Actions=ResetWindow;
+
+[Desktop Action ResetWindow]
+Name=Open with default window size
+Exec=github-desktop-enhanced --reset-window

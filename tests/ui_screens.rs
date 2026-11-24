@@ -1,0 +1,120 @@
+//! Drives the real app headlessly and renders its main screens.
+//!
+//! Needs a GPU or a software Vulkan driver (lavapipe), so it is ignored by default:
+//! `GDE_SCREENSHOT_DIR=/some/folder cargo test --test ui_screens -- --ignored`
+//! writes one PNG per screen into that folder.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::Duration;
+
+use eframe::egui;
+use egui_kittest::Harness;
+use egui_kittest::kittest::{NodeT, Queryable};
+use github_desktop_enhanced::app::DesktopApp;
+use github_desktop_enhanced::services::settings::{Settings, ThemeChoice};
+
+const WIDE: [f32; 2] = [1200.0, 760.0];
+const NARROW: [f32; 2] = [380.0, 760.0];
+
+fn git(dir: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .current_dir(dir)
+        .args(["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"])
+        .args(args)
+        .status()
+        .unwrap();
+    assert!(status.success(), "git {args:?}");
+}
+
+fn demo_repository(root: &Path) -> PathBuf {
+    let repo = root.join("demo-project");
+    std::fs::create_dir_all(&repo).unwrap();
+    git(&repo, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo.join("main.rs"), "fn main() {\n    println!(\"hello\");\n}\n").unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "First commit", "-m", "Sets up the project."]);
+    std::fs::write(repo.join("main.rs"), "fn main() {\n    println!(\"hello, world\");\n}\n").unwrap();
+    std::fs::write(repo.join("notes.txt"), "remember to write docs\n").unwrap();
+    repo
+}
+
+/// Clicks the list row (a button) whose label starts with `label`.
+fn click_row(harness: &Harness<'_, DesktopApp>, label: &str) {
+    harness
+        .get_all_by_role(egui::accesskit::Role::Button)
+        .find(|node| node.accesskit_node().label().is_some_and(|text| text.starts_with(label)))
+        .unwrap_or_else(|| panic!("no row starting with {label}"))
+        .click();
+}
+
+/// Steps until background git tasks have had time to finish.
+fn settle(harness: &mut Harness<'_, DesktopApp>) {
+    for _ in 0..30 {
+        harness.step();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn save(harness: &mut Harness<'_, DesktopApp>, name: &str) {
+    let image = harness.render().expect("render");
+    if let Ok(dir) = std::env::var("GDE_SCREENSHOT_DIR") {
+        image.save(Path::new(&dir).join(format!("{name}.png"))).unwrap();
+    }
+}
+
+#[test]
+#[ignore = "needs a GPU or software Vulkan; run with --ignored"]
+fn renders_main_screens() {
+    let root = std::env::temp_dir().join(format!("gde-ui-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    // SAFETY: this test binary runs a single test, before any other thread reads the environment.
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", root.join("config")) };
+
+    let welcome_settings = Settings::default();
+    let mut welcome =
+        Harness::builder().with_size(WIDE).build_eframe(|cc| DesktopApp::new(cc, welcome_settings));
+    settle(&mut welcome);
+    save(&mut welcome, "welcome");
+
+    let repo = demo_repository(&root);
+    for theme in [ThemeChoice::Dark, ThemeChoice::Light] {
+        let settings = Settings {
+            repositories: vec![repo.clone()],
+            selected_repository: Some(repo.clone()),
+            theme,
+            ..Settings::default()
+        };
+        let suffix = format!("{theme:?}").to_lowercase();
+        // The harness applies its own theme after the app starts, so it is set here as well.
+        let egui_theme = if theme == ThemeChoice::Light { egui::Theme::Light } else { egui::Theme::Dark };
+        let mut harness = Harness::builder()
+            .with_size(WIDE)
+            .with_theme(egui_theme)
+            .build_eframe(|cc| DesktopApp::new(cc, settings));
+        settle(&mut harness);
+        click_row(&harness, "main.rs");
+        settle(&mut harness);
+        save(&mut harness, &format!("changes-{suffix}"));
+
+        harness.get_by_label("History").click();
+        settle(&mut harness);
+        click_row(&harness, "First commit");
+        settle(&mut harness);
+        click_row(&harness, "main.rs");
+        settle(&mut harness);
+        save(&mut harness, &format!("history-{suffix}"));
+
+        harness.get_by_label_contains("Changes").click();
+        settle(&mut harness);
+        harness.set_size(NARROW.into());
+        settle(&mut harness);
+        save(&mut harness, &format!("narrow-{suffix}"));
+
+        click_row(&harness, "main.rs");
+        settle(&mut harness);
+        save(&mut harness, &format!("narrow-diff-{suffix}"));
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}

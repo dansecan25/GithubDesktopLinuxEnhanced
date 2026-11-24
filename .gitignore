@@ -1,0 +1,15 @@
+# Build output
+/target
+/dist
+
+# Secrets and machine-specific notes. Never commit these.
+.env
+.env.*
+!.env.example
+CONTEXT.local.md
+
+# Editor and OS files
+.idea/
+.vscode/
+*.swp
+.DS_Store
