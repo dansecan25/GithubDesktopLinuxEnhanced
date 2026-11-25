@@ -6,7 +6,40 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
 use crate::constants::app::{APP_ID, VERSION};
-use crate::constants::github::{API_BASE, API_TIMEOUT, CONNECT_TIMEOUT};
+use crate::constants::github::{API_BASE, API_TIMEOUT, CONNECT_TIMEOUT, GITHUB_HOST};
+
+/// The github.com page of a repository, from its remote URL (HTTPS or SSH). `None` for other hosts.
+pub fn web_url(remote_url: &str) -> Option<String> {
+    let url = remote_url.trim().trim_end_matches('/');
+    let url = url.strip_suffix(".git").unwrap_or(url);
+    let path = if let Some(rest) = url.strip_prefix("git@github.com:") {
+        rest
+    } else {
+        let without_scheme = url.split_once("://").map(|(_, rest)| rest)?;
+        // Drops `user@` or `user:token@` before the host.
+        let host_and_path = without_scheme.rsplit_once('@').map_or(without_scheme, |(_, rest)| rest);
+        let (host, path) = host_and_path.split_once('/')?;
+        if !host.eq_ignore_ascii_case(GITHUB_HOST) && host != "ssh.github.com:443" {
+            return None;
+        }
+        path
+    };
+    let mut parts = path.split('/').filter(|part| !part.is_empty());
+    let (owner, name) = (parts.next()?, parts.next()?);
+    parts.next().is_none().then(|| format!("https://{GITHUB_HOST}/{owner}/{name}"))
+}
+
+/// The github.com page of a branch.
+pub fn branch_url(repository_url: &str, branch: &str) -> String {
+    let encoded: String = branch
+        .chars()
+        .map(|c| match c {
+            '#' | '%' | '?' | ' ' | '&' => format!("%{:02X}", c as u32),
+            c => c.to_string(),
+        })
+        .collect();
+    format!("{repository_url}/tree/{encoded}")
+}
 
 pub fn agent(timeout: Duration) -> ureq::Agent {
     ureq::Agent::config_builder()
@@ -124,4 +157,27 @@ pub fn latest_release(repository: &str) -> Result<Release, String> {
             .header("Accept", "application/vnd.github+json")
             .call(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn web_urls_from_remote_urls() {
+        let expected = Some("https://github.com/owner/repo".to_owned());
+        assert_eq!(web_url("https://github.com/owner/repo.git"), expected);
+        assert_eq!(web_url("https://user:token@github.com/owner/repo"), expected);
+        assert_eq!(web_url("git@github.com:owner/repo.git"), expected);
+        assert_eq!(web_url("ssh://git@github.com/owner/repo.git/"), expected);
+        assert_eq!(web_url("https://gitlab.com/owner/repo.git"), None);
+        assert_eq!(web_url("/home/me/repo"), None);
+    }
+
+    #[test]
+    fn branch_urls_escape_special_characters() {
+        let base = "https://github.com/o/r";
+        assert_eq!(branch_url(base, "feature/login"), "https://github.com/o/r/tree/feature/login");
+        assert_eq!(branch_url(base, "fix#12"), "https://github.com/o/r/tree/fix%2312");
+    }
 }

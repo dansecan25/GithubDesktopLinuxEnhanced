@@ -1,11 +1,15 @@
 use std::fmt;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::constants::app::{ASKPASS_SOCKET_ENV, ASKPASS_TOKEN_ENV};
-use crate::constants::git::GIT_BINARY;
+use crate::constants::git::{
+    GIT_BINARY, GIT_POLL_MAX, GIT_TIMEOUT, MAX_GIT_ERROR_BYTES, MAX_GIT_OUTPUT_BYTES, UNTIMED_GIT_COMMANDS,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitError {
@@ -47,13 +51,62 @@ pub struct GitOutput {
     pub stdout: String,
     pub stderr: String,
     pub exit_code: i32,
+    /// stdout went over the size limit, so git was stopped and `stdout` holds only the start.
+    pub truncated: bool,
+}
+
+/// Git commands running right now, for the watchdog's freeze reports.
+static RUNNING: Mutex<Vec<(u64, String, Instant)>> = Mutex::new(Vec::new());
+static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
+/// Each running git command (credentials removed) and how long it has been running.
+pub fn running_commands() -> Vec<(String, Duration)> {
+    let running = RUNNING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    running.iter().map(|(_, command, started)| (command.clone(), started.elapsed())).collect()
+}
+
+/// Lists a command in [`RUNNING`] until dropped.
+struct Registration(u64);
+
+impl Registration {
+    fn new(args: &[&str]) -> Self {
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let command = describe(args);
+        RUNNING.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push((id, command, Instant::now()));
+        Self(id)
+    }
+}
+
+impl Drop for Registration {
+    fn drop(&mut self) {
+        RUNNING.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).retain(|(id, ..)| *id != self.0);
+    }
+}
+
+/// `git <args>`, with any `user:password@` in a URL removed.
+fn describe(args: &[&str]) -> String {
+    let words = args.iter().map(|arg| match arg.split_once("://") {
+        Some((scheme, rest)) if rest.split('/').next().is_some_and(|host| host.contains('@')) => {
+            let after_at = rest.split_once('@').map_or(rest, |(_, after)| after);
+            format!("{scheme}://***@{after_at}")
+        }
+        _ => (*arg).to_owned(),
+    });
+    std::iter::once(GIT_BINARY.to_owned()).chain(words).collect::<Vec<_>>().join(" ")
 }
 
 /// Every git call in the app goes through here.
 ///
 /// Terminal prompts are disabled because there is no terminal. Credentials come from the user's
 /// credential helper or SSH agent, and otherwise from the askpass bridge, which asks in the app.
+///
+/// Output past `MAX_GIT_OUTPUT_BYTES` stops git, and local commands are stopped after
+/// `GIT_TIMEOUT`, so one bad command can't use up the computer's memory or hang forever.
 pub fn run_raw(dir: &Path, args: &[&str], stdin: Option<&str>) -> GitResult<GitOutput> {
+    run_limited(dir, args, stdin, MAX_GIT_OUTPUT_BYTES)
+}
+
+fn run_limited(dir: &Path, args: &[&str], stdin: Option<&str>, max_stdout: usize) -> GitResult<GitOutput> {
     let mut command = Command::new(GIT_BINARY);
     command
         .current_dir(dir)
@@ -77,18 +130,65 @@ pub fn run_raw(dir: &Path, args: &[&str], stdin: Option<&str>) -> GitResult<GitO
 
     let mut child =
         command.spawn().map_err(|error| GitError::new(format!("Could not start git: {error}")))?;
+    let _running = Registration::new(args);
     if let (Some(input), Some(mut pipe)) = (stdin, child.stdin.take()) {
         pipe.write_all(input.as_bytes())
             .map_err(|error| GitError::new(format!("Could not write to git: {error}")))?;
     }
-    let output =
-        child.wait_with_output().map_err(|error| GitError::new(format!("git did not finish: {error}")))?;
+    let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
+        return Err(GitError::new("Could not read git's output"));
+    };
+    let stdout = std::thread::spawn(move || read_capped(stdout, max_stdout));
+    let stderr = std::thread::spawn(move || read_capped(stderr, MAX_GIT_ERROR_BYTES));
+
+    let timeout = args.first().filter(|name| !UNTIMED_GIT_COMMANDS.contains(name)).map(|_| GIT_TIMEOUT);
+    let status =
+        wait(&mut child, timeout).map_err(|error| GitError::new(format!("git did not finish: {error}")))?;
+    // After a timeout the readers aren't joined: a process git started may still hold the pipes open.
+    let Some(status) = status else {
+        return Err(GitError::new(format!(
+            "`{}` took more than {} minutes, so it was stopped.",
+            describe(args),
+            GIT_TIMEOUT.as_secs() / 60
+        )));
+    };
+    let (stdout, truncated) = stdout.join().unwrap_or_default();
+    let (stderr, _) = stderr.join().unwrap_or_default();
 
     Ok(GitOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        exit_code: output.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&stderr).into_owned(),
+        exit_code: status.code().unwrap_or(-1),
+        truncated,
     })
+}
+
+/// Reads up to `max` bytes. Stopping early closes the pipe, which ends git with SIGPIPE.
+fn read_capped(pipe: impl Read, max: usize) -> (Vec<u8>, bool) {
+    let mut bytes = Vec::new();
+    let _ = pipe.take(max as u64 + 1).read_to_end(&mut bytes);
+    let truncated = bytes.len() > max;
+    bytes.truncate(max);
+    (bytes, truncated)
+}
+
+/// Waits for git, killing it after `timeout`. `None` means it was killed.
+fn wait(child: &mut Child, timeout: Option<Duration>) -> std::io::Result<Option<ExitStatus>> {
+    let Some(timeout) = timeout else { return child.wait().map(Some) };
+    let deadline = Instant::now() + timeout;
+    let mut pause = Duration::from_millis(1);
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(Some(status));
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(None);
+        }
+        std::thread::sleep(pause);
+        pause = (pause * 2).min(GIT_POLL_MAX);
+    }
 }
 
 /// Runs git and returns stdout, or stderr as the error when git exits with a non-zero code.
@@ -98,7 +198,25 @@ pub fn run(dir: &Path, args: &[&str]) -> GitResult<String> {
 
 pub fn run_with_input(dir: &Path, args: &[&str], stdin: Option<&str>) -> GitResult<String> {
     let output = run_raw(dir, args, stdin)?;
+    if output.truncated {
+        return Err(GitError::new(format!(
+            "`{}` printed more than {} MB, so it was stopped.",
+            describe(args),
+            MAX_GIT_OUTPUT_BYTES / (1024 * 1024)
+        )));
+    }
     if output.exit_code == 0 { Ok(output.stdout) } else { Err(error_from_output(&output)) }
+}
+
+/// Like [`run`], but keeps only the first `max_bytes` of the output instead of failing. For diffs,
+/// which are cut for display anyway.
+pub fn run_capped(dir: &Path, args: &[&str], max_bytes: usize) -> GitResult<String> {
+    let output = run_limited(dir, args, None, max_bytes)?;
+    if output.exit_code == 0 || output.truncated {
+        Ok(output.stdout)
+    } else {
+        Err(error_from_output(&output))
+    }
 }
 
 fn error_from_output(output: &GitOutput) -> GitError {
@@ -108,5 +226,26 @@ fn error_from_output(output: &GitOutput) -> GitError {
         GitError::new(format!("git exited with code {}", output.exit_code))
     } else {
         GitError::new(message)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn descriptions_hide_url_credentials() {
+        assert_eq!(
+            describe(&["clone", "--", "https://user:secret@github.com/o/r.git"]),
+            "git clone -- https://***@github.com/o/r.git"
+        );
+        assert_eq!(describe(&["clone", "https://github.com/o/r"]), "git clone https://github.com/o/r");
+        assert_eq!(describe(&["status"]), "git status");
+    }
+
+    #[test]
+    fn capped_reads_stop_at_the_limit() {
+        assert_eq!(read_capped(&b"abcdef"[..], 4), (b"abcd".to_vec(), true));
+        assert_eq!(read_capped(&b"abc"[..], 4), (b"abc".to_vec(), false));
     }
 }

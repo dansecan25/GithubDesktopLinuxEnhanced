@@ -96,6 +96,22 @@ pub enum TaskOutput {
     SignedOut(Result<(), String>),
 }
 
+impl TaskOutput {
+    /// For the watchdog's reports.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Snapshot { .. } => "applying a repository refresh",
+            Self::WorkingDiff { .. } => "showing a file's changes",
+            Self::History { .. } => "showing the history",
+            Self::CommitFiles { .. } => "showing a commit's files",
+            Self::CommitDiff { .. } => "showing a commit's diff",
+            Self::Operation { .. } => "finishing a git operation",
+            Self::RepositoryOpened { .. } => "opening a repository",
+            Self::AccountLoaded(_) | Self::SignedIn(_) | Self::SignedOut(_) => "updating the GitHub account",
+        }
+    }
+}
+
 pub struct Tasks {
     sender: Sender<TaskOutput>,
     receiver: Receiver<TaskOutput>,

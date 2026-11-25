@@ -48,3 +48,7 @@ pub fn add(path: &Path, name: &str, url: &str) -> GitResult<()> {
     run(path, &["remote", "add", "--", name, url.trim()])?;
     Ok(())
 }
+
+pub fn url(path: &Path, remote: &str) -> GitResult<String> {
+    Ok(run(path, &["remote", "get-url", "--", remote])?.trim().to_owned())
+}

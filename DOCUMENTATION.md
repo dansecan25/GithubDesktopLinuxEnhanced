@@ -29,7 +29,7 @@ src/
                      every UI string (text.rs)
   models/            Plain data: FileChange, Branch, CommitSummary, StashEntry, Tag, Diff, RepoSnapshot
   git/               Git operations, one module per area
-    runner.rs        The only place that starts `git`; adds the askpass environment
+    runner.rs        The only place that starts `git`; adds the askpass environment, caps output, times out local commands
     parse.rs         Pure parsers for git's machine-readable output, binary detection (unit tested)
     repository.rs    Find root, init, clone, load the snapshot
     changes.rs       Working-tree diff, commit, discard, .gitignore
@@ -48,6 +48,8 @@ src/
     settings.rs      Load and atomically save settings.json
     window_state.rs  Window size validation and recording (the shrinking-window fix)
     system.rs        Open with the desktop's default app; start programs without zombies
+    memory_cap.rs    Relaunch inside a memory-limited systemd scope; start other programs outside it
+    watchdog.rs      Freeze and memory reports, and closing the app before it slows the computer
   stores/            UI state for the open repository (RepoStore) and the Loadable wrapper
   ui/
     actions.rs       Every user intent as an Action enum
@@ -61,8 +63,11 @@ tests/
   git_operations.rs  Integration tests against real throwaway repositories and bare remotes
   askpass.rs         The credential bridge end to end, with the real binary and real git
   ui_screens.rs      Headless render of the screens, menus and dialogs (ignored by default)
+  readme_screenshots.rs  Renders docs/screenshots/ from a made-up project (ignored by default)
+docs/screenshots/    README images
 packaging/           Desktop entry, icon, per-user install script (also used by the updater)
 release.sh           Checks, tests, release build and package. Used locally and by CI
+limited.sh           Runs a build or test with memory and CPU limits
 ```
 
 ## Data flow

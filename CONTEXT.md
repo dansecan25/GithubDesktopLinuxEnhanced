@@ -19,6 +19,11 @@ are in [README.md](README.md). Structure and internals are in [DOCUMENTATION.md]
   write them to settings, logs or error messages.
 - Before saying a change is done: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
   `cargo test`, and for UI changes the screenshot test in `tests/ui_screens.rs`.
+- Run builds and tests through `./limited.sh`. The owner's laptop froze (2026-11-24) when the
+  screenshot tests ran while swap was already full: software rendering plus a parallel build used
+  up the memory, and nothing stopped it. Never run the screenshot tests right after a full build.
+- Programs the app starts for the user (editors, file manager) go through
+  `memory_cap::outside_cap`, so they don't count against the app's memory limit.
 - Check new dependencies with `cargo audit` and keep the count low.
 
 ## Production setup
@@ -37,7 +42,13 @@ in `Cargo.toml`. Nothing machine-specific belongs in this repository. Use a giti
 - A freeze after a right-click was reported once (2026-11-24), with a file just downloaded into the
   repository. It could not be reproduced headlessly. Likely causes were fixed: the folder picker no
   longer runs on the UI thread, non-UTF-8 files show as binary, and very long diff lines are cut. If
-  it happens again, note the exact steps.
+  it happens again, note the exact steps. Since then the watchdog (`services/watchdog.rs`) writes
+  a report to `~/.local/state/github-desktop-enhanced/reports/` when a frame takes over 5 s: ask
+  for it.
+- Right-click menus are drawn by `ui/components/clicks.rs`, not egui's own context menu. egui keeps
+  one popup open at a time, so its menus closed the dropdown they were opened from, and some
+  touchpads send a left click with the right click. Use `right_click_menu`, `left_clicked` and
+  `dropdown_menu` for any new menu or clickable row.
 - Diff text can't be selected or copied yet.
 - Commits always include whole files. Line-by-line selection isn't implemented.
 - Merge conflicts are shown with a `!` marker, but there are no conflict resolution tools. Finish the

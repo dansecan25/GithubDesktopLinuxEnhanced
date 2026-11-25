@@ -14,7 +14,7 @@ pub const MAX_WINDOW_DIMENSION: f32 = 16384.0;
 /// Below this width the two-pane layout collapses into a single column.
 pub const NARROW_LAYOUT_WIDTH: f32 = 760.0;
 
-pub const SIDEBAR_DEFAULT_WIDTH: f32 = 320.0;
+pub const SIDEBAR_DEFAULT_WIDTH: f32 = 280.0;
 pub const SIDEBAR_MIN_WIDTH: f32 = 240.0;
 pub const SIDEBAR_MAX_WIDTH: f32 = 560.0;
 
@@ -29,3 +29,8 @@ pub const COMMIT_DESCRIPTION_ROWS: usize = 4;
 pub const DIALOG_WIDTH: f32 = 460.0;
 pub const PANEL_PADDING: i8 = 8;
 pub const TAB_AS_SPACES: &str = "    ";
+
+/// A left click this soon after a right-click press is treated as part of the right-click
+/// (some touchpads send both).
+pub const CLICK_AFTER_RIGHT_CLICK_SECONDS: f64 = 0.4;
+pub const RIGHT_CLICK_MENU_MIN_WIDTH: f32 = 200.0;

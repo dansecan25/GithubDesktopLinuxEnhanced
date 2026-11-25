@@ -23,10 +23,11 @@ use crate::services::secrets;
 use crate::services::settings::{self, Settings};
 use crate::services::tasks::{TaskOutput, Tasks};
 use crate::services::update::{self, Updater};
+use crate::services::watchdog;
 use crate::services::window_state::WindowGeometry;
 use crate::stores::RepoStore;
 use crate::ui::actions::{Action, Tab};
-use crate::ui::components::error_banner;
+use crate::ui::components::{error_banner, record_secondary_presses};
 use crate::ui::dialogs::{self, Dialog, DialogContext};
 use crate::ui::theme;
 use crate::ui::views::{self, ViewContext};
@@ -82,7 +83,7 @@ impl DesktopApp {
             detail_open: false,
             dialog: None,
             dialog_opening: 0,
-            error: askpass_error,
+            error: askpass_error.or_else(watchdog::take_last_exit_notice),
             busy: None,
             editors: editor::detect(),
             account,
@@ -157,12 +158,16 @@ impl DesktopApp {
 impl eframe::App for DesktopApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        watchdog::frame_started();
         for output in self.tasks.finished() {
+            watchdog::set_activity(output.name());
             self.apply_task(output);
         }
+        watchdog::set_activity("drawing the window");
         self.updater.poll(&ctx, self.settings.auto_update);
         self.poll_prompts();
 
+        record_secondary_presses(&ctx);
         let mut actions = Vec::new();
         self.track_window(&ctx, &mut actions);
         self.shortcuts(&ctx, &mut actions);
@@ -214,7 +219,11 @@ impl eframe::App for DesktopApp {
         }
 
         for action in actions {
+            watchdog::doing("handling", &action);
             self.handle(&ctx, action);
+        }
+        if let Some(message) = watchdog::frame_finished() {
+            self.error = Some(message);
         }
     }
 

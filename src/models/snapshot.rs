@@ -21,4 +21,6 @@ pub struct RepoSnapshot {
     /// Newest first.
     pub tags: Vec<Tag>,
     pub remote: Option<String>,
+    /// URL of `remote`, for example `git@github.com:owner/repo.git`.
+    pub remote_url: Option<String>,
 }

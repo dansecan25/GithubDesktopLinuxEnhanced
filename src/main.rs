@@ -3,7 +3,7 @@ use eframe::egui;
 use github_desktop_enhanced::app::{DesktopApp, initial_window};
 use github_desktop_enhanced::constants::app::{APP_ID, APP_NAME, RESET_WINDOW_FLAG, VERSION, VERSION_FLAG};
 use github_desktop_enhanced::constants::layout::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH};
-use github_desktop_enhanced::services::{askpass, settings};
+use github_desktop_enhanced::services::{askpass, memory_cap, settings, watchdog};
 
 fn main() -> eframe::Result {
     // Git starts this executable as its credential helper: answer and exit, no window.
@@ -14,6 +14,9 @@ fn main() -> eframe::Result {
         println!("{APP_NAME} {VERSION}");
         return Ok(());
     }
+    // Returns only when the limit can't be applied; otherwise this process is replaced.
+    memory_cap::relaunch_capped();
+    watchdog::start();
     let reset_window = std::env::args().any(|arg| arg == RESET_WINDOW_FLAG);
     let mut settings = settings::load();
     let window = initial_window(&mut settings, reset_window);

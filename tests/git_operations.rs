@@ -270,3 +270,16 @@ fn ignore_file_adds_an_anchored_escaped_pattern_once() {
     let left = repo.changes();
     assert!(left.iter().all(|c| c.path != "report [draft].pdf"), "{left:?}");
 }
+
+#[test]
+fn huge_diffs_are_cut_without_reading_all_of_git_output() {
+    let repo = TempRepo::new();
+    repo.write("data.txt", "start\n");
+    git(&repo.0, &["add", "."]);
+    git(&repo.0, &["commit", "-m", "first"]);
+    // About 8 MB of diff, four times the display limit.
+    repo.write("data.txt", &"a line that changed in a generated file\n".repeat(200_000));
+    let change = find(&repo.changes(), "data.txt").clone();
+    let diff = changes::working_diff(&repo.0, &change, true).expect("a cut diff, not an error");
+    assert!(diff.is_truncated);
+}

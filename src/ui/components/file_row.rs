@@ -27,7 +27,9 @@ pub fn file_row(ui: &mut Ui, change: &FileChange, selected: bool, included: Opti
         }
         let badge =
             RichText::new(letter).monospace().strong().color(theme::change_color(&palette, change.kind));
+        // Cut long paths with "…" instead of widening the panel. The full path is in the tooltip.
         let row = Button::selectable(selected, label)
+            .truncate()
             .right_text(badge)
             .min_size(egui::vec2(ui.available_width(), LIST_ROW_HEIGHT));
         ui.add(row).on_hover_text(format!("{kind_name}: {}", change.path))

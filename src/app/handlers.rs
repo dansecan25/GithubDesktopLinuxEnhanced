@@ -160,6 +160,11 @@ impl DesktopApp {
                 }
             }
             Action::OpenInEditor(path) => self.open_in_editor(&path),
+            Action::OpenUrl(url) => {
+                if let Err(error) = system::open_with_system(&url) {
+                    self.error = Some(error.to_string());
+                }
+            }
             Action::CopyText(value) => ctx.copy_text(value),
 
             Action::SetTheme(choice) => {

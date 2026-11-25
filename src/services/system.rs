@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::ffi::OsStr;
 use std::process::{Command, Stdio};
 
 #[cfg(target_os = "macos")]
@@ -14,9 +14,9 @@ pub fn spawn_detached(mut command: Command) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Opens a folder in the file manager, or a file in its default app.
-pub fn open_with_system(path: &Path) -> std::io::Result<()> {
-    let mut command = Command::new(OPENER);
-    command.arg(path);
+/// Opens a folder in the file manager, a file in its default app, or a URL in the browser.
+pub fn open_with_system(target: impl AsRef<OsStr>) -> std::io::Result<()> {
+    let mut command = super::memory_cap::outside_cap(OPENER);
+    command.arg(target);
     spawn_detached(command)
 }

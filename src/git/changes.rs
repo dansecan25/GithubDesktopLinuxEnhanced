@@ -2,7 +2,7 @@ use std::io::Read;
 use std::path::Path;
 
 use super::parse;
-use super::runner::{GitError, GitResult, run, run_with_input};
+use super::runner::{GitError, GitResult, run, run_capped, run_with_input};
 use crate::constants::git::{EMPTY_TREE_HASH, MAX_DIFF_BYTES};
 use crate::models::{ChangeKind, Diff, FileChange};
 
@@ -16,7 +16,7 @@ pub fn working_diff(repo: &Path, change: &FileChange, has_commits: bool) -> GitR
     let mut args = vec!["diff", "--no-color", "--no-ext-diff", "-M", base, "--"];
     args.extend(change.original_path.as_deref());
     args.push(&change.path);
-    Ok(parse::parse_diff(&run(repo, &args)?))
+    Ok(parse::parse_diff(&run_capped(repo, &args, MAX_DIFF_BYTES + 1)?))
 }
 
 fn untracked_file_diff(file: &Path) -> GitResult<Diff> {

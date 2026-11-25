@@ -159,6 +159,9 @@ pub const OPEN_WITH_DEFAULT_APP: &str = "Open with default program";
 pub const COPY_PATH: &str = "Copy full path";
 pub const COPY_RELATIVE_PATH: &str = "Copy relative path";
 pub const COPY_SHA: &str = "Copy commit SHA";
+pub const OPEN_ON_GITHUB: &str = "Open repository on GitHub";
+pub const VIEW_BRANCH_ON_GITHUB: &str = "View branch on GitHub";
+pub const COPY_BRANCH_NAME: &str = "Copy branch name";
 pub const IGNORE_FILE: &str = "Ignore file (add to .gitignore)";
 pub const CREATE_TAG_HERE: &str = "Create tag…";
 pub const PUSH_TAG: &str = "Push tag";
@@ -262,4 +265,16 @@ pub fn update_installed(version: &str) -> String {
 
 pub fn current_version(version: &str) -> String {
     format!("Current version: {version}")
+}
+
+// Watchdog
+pub fn window_was_stuck(seconds: u64, report: &str) -> String {
+    format!("The window stopped responding for {seconds} s. A report was saved to {report}")
+}
+
+pub fn closed_for_memory(used_mib: u64, limit_mib: u64, report: &str) -> String {
+    format!(
+        "The app closed itself last time because it used {used_mib} MB of memory (limit {limit_mib} MB), \
+         before it could slow down your computer. A report was saved to {report}"
+    )
 }

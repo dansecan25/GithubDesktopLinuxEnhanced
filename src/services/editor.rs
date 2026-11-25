@@ -1,8 +1,8 @@
 //! Opening a repository or file in the user's code editor.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
+use super::memory_cap::outside_cap;
 use super::system::spawn_detached;
 use crate::constants::editors::KNOWN_EDITORS;
 
@@ -60,7 +60,7 @@ pub fn split_command(command: &str) -> Vec<String> {
 pub fn open(command: &str, path: &Path) -> Result<(), String> {
     let parts = split_command(command);
     let (program, arguments) = parts.split_first().ok_or("Choose an editor in Preferences first")?;
-    let mut process = Command::new(program);
+    let mut process = outside_cap(program);
     process.args(arguments).arg(path);
     spawn_detached(process).map_err(|error| format!("Could not start {program}: {error}"))
 }

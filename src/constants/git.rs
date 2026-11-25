@@ -26,3 +26,20 @@ pub const RECORD_SEP: char = '\u{1e}';
 
 /// Longer diff lines are cut for display (minified files, generated data).
 pub const MAX_DIFF_LINE_BYTES: usize = 2000;
+
+/// Most git output read into memory. Past this git is stopped, so a runaway command can't use up
+/// the computer's memory. Diffs use the much smaller `MAX_DIFF_BYTES`.
+pub const MAX_GIT_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
+
+/// Most of git's error output kept.
+pub const MAX_GIT_ERROR_BYTES: usize = 1024 * 1024;
+
+/// Local git commands that take longer than this are stopped.
+pub const GIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
+/// Commands without a time limit: they wait on the network, a credential prompt or commit hooks,
+/// which can all take as long as they need.
+pub const UNTIMED_GIT_COMMANDS: &[&str] = &["clone", "fetch", "pull", "push", "commit", "ls-remote"];
+
+/// Longest pause between checks on whether a timed git command has finished.
+pub const GIT_POLL_MAX: std::time::Duration = std::time::Duration::from_millis(20);

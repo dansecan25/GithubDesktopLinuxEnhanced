@@ -6,7 +6,8 @@ use eframe::egui::{self, Ui};
 
 use super::ViewContext;
 use crate::constants::text;
-use crate::models::{ChangeKind, CommitSummary, FileChange, RepoSnapshot};
+use crate::github;
+use crate::models::{Branch, ChangeKind, CommitSummary, FileChange, RepoSnapshot};
 use crate::ui::actions::Action;
 use crate::ui::dialogs::{Dialog, TagForm};
 
@@ -21,9 +22,23 @@ fn path_text(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
+/// The repository's page on github.com, when its remote is on GitHub.
+pub fn github_url(snapshot: &RepoSnapshot) -> Option<String> {
+    snapshot.remote_url.as_deref().and_then(github::web_url)
+}
+
 /// For a repository in the list or the current repository button.
-pub fn repository(ui: &mut Ui, view: &ViewContext<'_>, path: &Path, actions: &mut Vec<Action>) {
+pub fn repository(
+    ui: &mut Ui,
+    view: &ViewContext<'_>,
+    path: &Path,
+    github: Option<&str>,
+    actions: &mut Vec<Action>,
+) {
     item(ui, view.open_in_label, true, actions, || Action::OpenInEditor(path.to_path_buf()));
+    if let Some(url) = github {
+        item(ui, text::OPEN_ON_GITHUB, true, actions, || Action::OpenUrl(url.to_owned()));
+    }
     item(ui, text::SHOW_IN_FILE_MANAGER, true, actions, || Action::ShowInFileManager(path.to_path_buf()));
     item(ui, text::COPY_PATH, true, actions, || Action::CopyText(path_text(path)));
     ui.separator();
@@ -90,6 +105,56 @@ pub fn commit(
         tag_dialog(snapshot.expect("enabled only with a snapshot"), commit)
     });
     item(ui, text::COPY_SHA, true, actions, || Action::CopyText(commit.sha.clone()));
+}
+
+/// For a branch in the branch menu.
+pub fn branch(
+    ui: &mut Ui,
+    view: &ViewContext<'_>,
+    snapshot: &RepoSnapshot,
+    branch: &Branch,
+    actions: &mut Vec<Action>,
+) {
+    let github = github_url(snapshot);
+    let on_remote = remote_branch_name(snapshot, branch);
+    let branch_page = github.as_deref().zip(on_remote).map(|(base, name)| github::branch_url(base, name));
+    item(ui, text::VIEW_BRANCH_ON_GITHUB, branch_page.is_some(), actions, || {
+        Action::OpenUrl(branch_page.clone().unwrap_or_default())
+    });
+    item(ui, text::OPEN_ON_GITHUB, github.is_some(), actions, || {
+        Action::OpenUrl(github.clone().unwrap_or_default())
+    });
+    item(ui, text::COPY_BRANCH_NAME, true, actions, || Action::CopyText(branch.name.clone()));
+    if !branch.is_remote && !branch.is_current {
+        ui.separator();
+        item(ui, text::DELETE_BRANCH, view.busy.is_none(), actions, || {
+            Action::OpenDialog(Dialog::confirm(
+                text::DELETE_BRANCH,
+                text::delete_branch_body(&branch.name),
+                text::DELETE_BUTTON,
+                Action::DeleteBranch(branch.name.clone()),
+            ))
+        });
+    }
+}
+
+/// The branch's name on the remote: `origin/x` → `x`, the upstream of a local branch, or (like
+/// GitHub Desktop) a remote branch with the same name. `None` when the remote doesn't have it.
+fn remote_branch_name<'a>(snapshot: &RepoSnapshot, branch: &'a Branch) -> Option<&'a str> {
+    let short = |name: &'a str| name.split_once('/').map(|(_, short)| short);
+    if branch.is_remote {
+        return short(&branch.name);
+    }
+    if let Some(upstream) = branch.upstream.as_deref() {
+        return short(upstream);
+    }
+    let remote = snapshot.remote.as_deref()?;
+    let same_name = format!("{remote}/{}", branch.name);
+    snapshot
+        .branches
+        .iter()
+        .any(|other| other.is_remote && other.name == same_name)
+        .then_some(branch.name.as_str())
 }
 
 /// For a tag shown on a commit.

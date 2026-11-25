@@ -63,13 +63,19 @@ pub fn repository_name_from_url(url: &str) -> Option<String> {
 pub fn load_snapshot(path: &Path) -> GitResult<RepoSnapshot> {
     let status_output = run(path, &["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"])?;
     let (status, changes) = parse::parse_status(&status_output);
+    let remote = remote::preferred_remote(path)?;
+    let remote_url = match &remote {
+        Some(name) => remote::url(path, name).ok(),
+        None => None,
+    };
     Ok(RepoSnapshot {
         status,
         changes,
         branches: branches::list(path)?,
         stashes: stash::list(path)?,
         tags: tags::list(path)?,
-        remote: remote::preferred_remote(path)?,
+        remote,
+        remote_url,
     })
 }
 

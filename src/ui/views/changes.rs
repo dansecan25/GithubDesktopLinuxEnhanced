@@ -5,7 +5,8 @@ use crate::constants::text;
 use crate::stores::{Loadable, RepoStore};
 use crate::ui::actions::Action;
 use crate::ui::components::{
-    diff_view, empty_state, file_row, loadable_status, primary_button, secondary_button,
+    diff_view, empty_state, file_row, left_clicked, loadable_status, primary_button, right_click_menu,
+    secondary_button,
 };
 use crate::ui::dialogs::Dialog;
 
@@ -94,10 +95,10 @@ fn file_list(ui: &mut Ui, repo: &mut RepoStore, view: &ViewContext<'_>, actions:
             if included != repo.is_included(&change.path) {
                 repo.set_included(&change.path, included);
             }
-            if row.clicked() {
+            if left_clicked(&row) {
                 actions.push(Action::SelectFile(change.path.clone()));
             }
-            row.context_menu(|ui| context_menus::working_file(ui, view, &repo.path, change, actions));
+            right_click_menu(&row, |ui| context_menus::working_file(ui, view, &repo.path, change, actions));
         }
     });
 }

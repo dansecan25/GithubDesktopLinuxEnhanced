@@ -1,4 +1,4 @@
-use eframe::egui::{self, Popup, PopupCloseBehavior, RichText, Ui};
+use eframe::egui::{self, PopupCloseBehavior, RichText, Ui};
 
 use super::{ViewContext, context_menus};
 use crate::constants::layout::{MIN_TARGET_SIZE, SIDEBAR_DEFAULT_WIDTH};
@@ -7,7 +7,7 @@ use crate::models::{Branch, RepoSnapshot};
 use crate::services::settings::ThemeChoice;
 use crate::stores::RepoStore;
 use crate::ui::actions::Action;
-use crate::ui::components::toolbar_button;
+use crate::ui::components::{dropdown_menu, left_clicked, right_click_menu, toolbar_button};
 use crate::ui::dialogs::Dialog;
 use crate::ui::theme::{self, TOOLBAR_TEXT};
 use crate::utils::paths::display_name;
@@ -50,9 +50,12 @@ fn repository_menu(ui: &mut Ui, view: &ViewContext<'_>, repo: Option<&RepoStore>
     let name = repo.map(|repo| display_name(&repo.path)).unwrap_or_else(|| text::NO_REPOSITORY.to_owned());
     let response = toolbar_button(ui, text::CURRENT_REPOSITORY, &format!("{name} ▾"), true);
     if let Some(repo) = repo {
-        response.context_menu(|ui| context_menus::repository(ui, view, &repo.path, actions));
+        let github = repo.snapshot.ready().and_then(context_menus::github_url);
+        right_click_menu(&response, |ui| {
+            context_menus::repository(ui, view, &repo.path, github.as_deref(), actions);
+        });
     }
-    Popup::menu(&response).width(SIDEBAR_DEFAULT_WIDTH).show(|ui| {
+    dropdown_menu(&response).width(SIDEBAR_DEFAULT_WIDTH).show(|ui| {
         ui.label(RichText::new(text::REPOSITORIES).strong());
         if settings.repositories.is_empty() {
             ui.label(text::NO_REPOSITORIES_YET);
@@ -65,10 +68,17 @@ fn repository_menu(ui: &mut Ui, view: &ViewContext<'_>, repo: Option<&RepoStore>
                         .min_size(egui::vec2(ui.available_width(), MIN_TARGET_SIZE)),
                 )
                 .on_hover_text(path.to_string_lossy());
-            if row.clicked() {
+            if left_clicked(&row) {
                 actions.push(Action::SelectRepository(path.clone()));
             }
-            row.context_menu(|ui| context_menus::repository(ui, view, path, actions));
+            // Only the open repository's remote is known, so only it gets the GitHub link.
+            let github = repo
+                .filter(|repo| repo.path == *path)
+                .and_then(|repo| repo.snapshot.ready())
+                .and_then(context_menus::github_url);
+            right_click_menu(&row, |ui| {
+                context_menus::repository(ui, view, path, github.as_deref(), actions)
+            });
         }
         ui.separator();
         if ui.button(text::ADD_EXISTING).clicked() {
@@ -93,7 +103,7 @@ fn branch_menu(
     let busy = view.busy.is_some();
     let current = snapshot.status.head.clone().unwrap_or_else(|| text::DETACHED_HEAD.to_owned());
     let response = toolbar_button(ui, text::CURRENT_BRANCH, &format!("{current} ▾"), !busy);
-    Popup::menu(&response)
+    dropdown_menu(&response)
         .width(SIDEBAR_DEFAULT_WIDTH)
         .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
@@ -123,7 +133,7 @@ fn branch_menu(
             egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
                 ui.label(RichText::new(text::LOCAL_BRANCHES).strong());
                 for branch in snapshot.branches.iter().filter(|b| !b.is_remote).filter(matches) {
-                    branch_row(ui, branch, actions);
+                    branch_row(ui, view, snapshot, branch, actions);
                 }
                 let local: Vec<&str> =
                     snapshot.branches.iter().filter(|b| !b.is_remote).map(|b| b.name.as_str()).collect();
@@ -141,34 +151,29 @@ fn branch_menu(
                 if !remote_only.is_empty() {
                     ui.label(RichText::new(text::REMOTE_BRANCHES).strong());
                     for branch in remote_only {
-                        branch_row(ui, branch, actions);
+                        branch_row(ui, view, snapshot, branch, actions);
                     }
                 }
             });
         });
 }
 
-fn branch_row(ui: &mut Ui, branch: &Branch, actions: &mut Vec<Action>) {
+fn branch_row(
+    ui: &mut Ui,
+    view: &ViewContext<'_>,
+    snapshot: &RepoSnapshot,
+    branch: &Branch,
+    actions: &mut Vec<Action>,
+) {
     let row = ui.add(
         egui::Button::selectable(branch.is_current, &branch.name)
             .min_size(egui::vec2(ui.available_width(), MIN_TARGET_SIZE)),
     );
-    if row.clicked() && !branch.is_current {
+    if left_clicked(&row) && !branch.is_current {
         actions.push(Action::SwitchBranch(branch.clone()));
         ui.close();
     }
-    if !branch.is_remote && !branch.is_current {
-        row.context_menu(|ui| {
-            if ui.button(text::DELETE_BRANCH).clicked() {
-                actions.push(Action::OpenDialog(Dialog::confirm(
-                    text::DELETE_BRANCH,
-                    text::delete_branch_body(&branch.name),
-                    text::DELETE_BUTTON,
-                    Action::DeleteBranch(branch.name.clone()),
-                )));
-            }
-        });
-    }
+    right_click_menu(&row, |ui| context_menus::branch(ui, view, snapshot, branch, actions));
 }
 
 /// One button that becomes Publish, Pull, Push or Fetch depending on the branch state, as in
@@ -212,7 +217,7 @@ fn sync_button(
 /// Preferences, theme and updates.
 fn app_menu(ui: &mut Ui, view: &ViewContext<'_>, actions: &mut Vec<Action>) {
     let response = icon_button(ui, "⋯", text::APP_MENU);
-    Popup::menu(&response).show(|ui| {
+    dropdown_menu(&response).show(|ui| {
         if ui.button(text::PREFERENCES).clicked() {
             actions.push(Action::OpenDialog(Dialog::preferences(view.settings, view.editors)));
         }

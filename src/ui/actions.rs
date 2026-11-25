@@ -32,6 +32,7 @@ pub enum Action {
     ShowInFileManager(PathBuf),
     OpenWithSystem(PathBuf),
     OpenInEditor(PathBuf),
+    OpenUrl(String),
     CopyText(String),
 
     SetTheme(ThemeChoice),

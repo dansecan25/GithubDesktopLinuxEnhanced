@@ -5,7 +5,10 @@ use crate::constants::text;
 use crate::models::{CommitSummary, RepoSnapshot};
 use crate::stores::{Loadable, RepoStore};
 use crate::ui::actions::Action;
-use crate::ui::components::{diff_view, empty_state, file_row, loadable_status, muted_text};
+use crate::ui::components::{
+    diff_view, dropdown_menu, empty_state, file_row, left_clicked, loadable_status, muted_text,
+    right_click_menu,
+};
 use crate::ui::theme;
 
 use super::{ViewContext, context_menus};
@@ -29,10 +32,10 @@ pub fn history_list(ui: &mut Ui, repo: &RepoStore, view: &ViewContext<'_>, actio
                 let selected = repo.selected_commit.as_deref() == Some(commit.sha.as_str());
                 let tags = tags_on(snapshot, &commit.sha);
                 let row = commit_row(ui, commit, &tags, selected, row_height);
-                if row.clicked() {
+                if left_clicked(&row) {
                     actions.push(Action::SelectCommit(commit.sha.clone()));
                 }
-                row.context_menu(|ui| context_menus::commit(ui, view, snapshot, commit, actions));
+                right_click_menu(&row, |ui| context_menus::commit(ui, view, snapshot, commit, actions));
             }
         },
     );
@@ -97,8 +100,8 @@ pub fn history_detail(
             for tag in tags {
                 let chip = ui.add(egui::Button::new(RichText::new(format!("◆ {tag}")).color(accent)));
                 // A tag has nothing to select, so left and right click both open its menu.
-                egui::Popup::menu(&chip).show(|ui| context_menus::tag(ui, view, tag, has_remote, actions));
-                chip.context_menu(|ui| context_menus::tag(ui, view, tag, has_remote, actions));
+                dropdown_menu(&chip).show(|ui| context_menus::tag(ui, view, tag, has_remote, actions));
+                right_click_menu(&chip, |ui| context_menus::tag(ui, view, tag, has_remote, actions));
             }
         });
     }
@@ -114,10 +117,12 @@ pub fn history_detail(
                 for file in files {
                     let selected = repo.selected_commit_file.as_deref() == Some(file.path.as_str());
                     let row = file_row(ui, file, selected, None);
-                    if row.clicked() {
+                    if left_clicked(&row) {
                         actions.push(Action::SelectCommitFile(file.path.clone()));
                     }
-                    row.context_menu(|ui| context_menus::commit_file(ui, view, &repo.path, file, actions));
+                    right_click_menu(&row, |ui| {
+                        context_menus::commit_file(ui, view, &repo.path, file, actions)
+                    });
                 }
             });
         }
