@@ -36,6 +36,17 @@ pub const REMOTE_BRANCHES: &str = "Remote branches";
 pub const DELETE_BRANCH: &str = "Delete branch…";
 pub const FILTER_BRANCHES: &str = "Filter branches";
 
+// Merge
+pub const CREATE_MERGE_COMMIT: &str = "Create a merge commit";
+pub const NO_OTHER_BRANCHES: &str = "There are no other branches to merge.";
+pub const CHOOSE_BRANCH_TO_MERGE: &str = "Choose a branch to see what merging it would do.";
+pub const CHECKING_MERGE: &str = "Checking for conflicts…";
+pub const MERGE_IN_PROGRESS: &str =
+    "Merge in progress. Resolve the files marked with !, then commit to finish the merge.";
+pub const ABORT_MERGE: &str = "Abort merge";
+pub const ABORT_MERGE_BODY: &str =
+    "Your branch goes back to how it was before the merge. Changes made to resolve conflicts are lost.";
+
 // Tabs
 pub const TAB_CHANGES: &str = "Changes";
 pub const TAB_HISTORY: &str = "History";
@@ -54,6 +65,15 @@ pub const STASHED_CHANGES: &str = "Stashed changes";
 pub const RESTORE_STASH: &str = "Restore";
 pub const DISCARD_STASH: &str = "Discard…";
 pub const STASH_MESSAGE: &str = "Stashed from GitHub Desktop Linux Enhanced";
+
+// Switching branches with changes
+pub const SWITCH_BRANCH_TITLE: &str = "Switch branch";
+pub const SWITCH_WITH_CHANGES_BODY: &str =
+    "You have changes on this branch. What would you like to do with them?";
+pub const LEAVE_CHANGES_HINT: &str =
+    "Your in-progress work will be stashed on this branch for you to return to later";
+pub const BRING_CHANGES_HINT: &str = "Your in-progress work will follow you to the new branch";
+pub const SWITCH_BRANCH_BUTTON: &str = "Switch branch";
 pub const INCLUDE_ALL: &str = "Include all changed files in the commit";
 
 // History
@@ -103,6 +123,8 @@ pub const PUSHING: &str = "Pushing";
 pub const SWITCHING_BRANCH: &str = "Switching branch";
 pub const CREATING_BRANCH: &str = "Creating branch";
 pub const DELETING_BRANCH: &str = "Deleting branch";
+pub const MERGING: &str = "Merging";
+pub const ABORTING_MERGE: &str = "Aborting merge";
 pub const STASHING: &str = "Stashing";
 pub const RESTORING_STASH: &str = "Restoring stash";
 pub const DROPPING_STASH: &str = "Discarding stash";
@@ -277,4 +299,53 @@ pub fn closed_for_memory(used_mib: u64, limit_mib: u64, report: &str) -> String 
         "The app closed itself last time because it used {used_mib} MB of memory (limit {limit_mib} MB), \
          before it could slow down your computer. A report was saved to {report}"
     )
+}
+
+pub fn merge_into(branch: &str) -> String {
+    format!("Choose a branch to merge into {branch}")
+}
+
+pub fn merge_title(branch: &str) -> String {
+    format!("Merge into {branch}")
+}
+
+fn commits(count: usize) -> String {
+    if count == 1 { "1 commit".to_owned() } else { format!("{count} commits") }
+}
+
+/// The same wording GitHub Desktop uses under its merge button.
+pub fn merge_preview(from: &str, into: &str, commit_count: usize, conflicts: Option<usize>) -> String {
+    match conflicts {
+        _ if commit_count == 0 => format!("This branch is up to date with {into}."),
+        Some(0) => format!("This will merge {} from {from} into {into}.", commits(commit_count)),
+        Some(1) => format!("There will be 1 conflicted file when merging {from} into {into}."),
+        Some(files) => format!("There will be {files} conflicted files when merging {from} into {into}."),
+        None => format!(
+            "This will merge {} from {from} into {into}. Conflicts can't be checked first with this git version.",
+            commits(commit_count)
+        ),
+    }
+}
+
+pub fn unresolved_conflicts(files: &[String]) -> String {
+    format!("These files still have conflict markers. Resolve them before committing: {}", files.join(", "))
+}
+
+pub fn leave_changes_on(branch: &str) -> String {
+    format!("Leave my changes on {branch}")
+}
+
+pub fn bring_changes_to(branch: &str) -> String {
+    format!("Bring my changes to {branch}")
+}
+
+pub fn bring_changes_failed(to: &str, from: &str) -> String {
+    format!(
+        "Your changes can't come with you: {to} has different versions of the same files. Switch again \
+         and choose \u{201c}Leave my changes on {from}\u{201d}, or commit them first."
+    )
+}
+
+pub fn changes_left_on(branch: &str) -> String {
+    format!("Changes left on {branch}")
 }

@@ -66,9 +66,19 @@ pub enum Action {
         private: bool,
     },
     AddRemote(String),
+    /// Switches right away when there are no changes, otherwise asks what to do with them.
     SwitchBranch(Branch),
+    /// The answer to that question: leave the changes stashed on this branch, or bring them along.
+    SwitchBranchWithChanges {
+        branch: Branch,
+        leave_changes: bool,
+    },
     CreateBranch(String),
     DeleteBranch(String),
+    /// Works out what merging this branch into the current one would do, for the merge dialog.
+    PreviewMerge(String),
+    Merge(String),
+    AbortMerge,
 
     CreateTag {
         name: String,

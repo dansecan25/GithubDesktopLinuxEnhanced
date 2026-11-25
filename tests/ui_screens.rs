@@ -149,6 +149,51 @@ fn dialogs_and_menus(harness: &mut Harness<'_, DesktopApp>, repo: &Path) {
     harness.key_press(egui::Key::Escape);
     settle(harness);
 
+    // A branch one commit ahead, made without touching the working tree.
+    let ahead = Command::new("git")
+        .current_dir(repo)
+        .args(["-c", "user.name=Test", "-c", "user.email=test@example.invalid"])
+        .args(["commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Feature work"])
+        .output()
+        .unwrap();
+    git(repo, &["branch", "feature", String::from_utf8_lossy(&ahead.stdout).trim()]);
+    harness.key_press(egui::Key::Escape);
+    harness.key_press(egui::Key::F5);
+    settle(harness);
+    if harness.query_by_label("Choose a branch to merge into main").is_none() {
+        click_row(harness, "Current branch");
+        settle(harness);
+    }
+    harness.get_by_label("Choose a branch to merge into main").click();
+    settle(harness);
+    harness
+        .get_all_by_role(egui::accesskit::Role::Button)
+        .find(|node| node.accesskit_node().label().as_deref() == Some("feature"))
+        .expect("feature row in the merge dialog")
+        .click();
+    settle(harness);
+    assert!(
+        harness.query_by_label("This will merge 1 commit from feature into main.").is_some(),
+        "merge preview text"
+    );
+    save(harness, "dialog-merge");
+    harness.key_press(egui::Key::Escape);
+    settle(harness);
+
+    // Switching with changes asks what to do with them, as GitHub Desktop does.
+    click_row(harness, "Current branch");
+    settle(harness);
+    harness
+        .get_all_by_role(egui::accesskit::Role::Button)
+        .find(|node| node.accesskit_node().label().as_deref() == Some("feature"))
+        .expect("feature row in the branch menu")
+        .click();
+    settle(harness);
+    assert!(harness.query_by_label("Leave my changes on main").is_some(), "switch dialog");
+    save(harness, "dialog-switch-branch");
+    harness.key_press(egui::Key::Escape);
+    settle(harness);
+
     harness.get_by_label("History").click();
     settle(harness);
     right_click_row(harness, "First commit");

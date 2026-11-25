@@ -23,4 +23,6 @@ pub struct RepoSnapshot {
     pub remote: Option<String>,
     /// URL of `remote`, for example `git@github.com:owner/repo.git`.
     pub remote_url: Option<String>,
+    /// While a merge is in progress (stopped on conflicts), its prepared commit summary.
+    pub merge_message: Option<String>,
 }

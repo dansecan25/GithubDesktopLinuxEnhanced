@@ -8,7 +8,7 @@ use eframe::egui;
 use super::DesktopApp;
 use crate::constants::git::DEFAULT_REMOTE;
 use crate::constants::text;
-use crate::git::{GitError, GitResult, branches, changes, history, remote, repository, stash, tags};
+use crate::git::{GitError, GitResult, branches, changes, history, merge, remote, repository, stash, tags};
 use crate::github;
 use crate::services::askpass::GitHubAccount;
 use crate::services::secrets;
@@ -98,6 +98,11 @@ impl DesktopApp {
     /// The remote and branch state needed by push and tag operations.
     fn remote_name(&self) -> Option<String> {
         self.repo.as_ref()?.snapshot.ready()?.remote.clone()
+    }
+
+    /// The checked-out branch, `None` when HEAD is detached.
+    fn current_branch(&self) -> Option<String> {
+        self.repo.as_ref()?.snapshot.ready()?.status.head.clone()
     }
 
     fn token(&self) -> Option<String> {
@@ -242,7 +247,26 @@ impl DesktopApp {
                 });
             }
             Action::SwitchBranch(branch) => {
-                self.run_operation(OperationKind::SwitchBranch, move |path| branches::switch(path, &branch));
+                let snapshot = self.repo.as_ref().and_then(|repo| repo.snapshot.ready());
+                if snapshot.is_some_and(|snapshot| !snapshot.changes.is_empty()) {
+                    let from = self.current_branch().unwrap_or_else(|| text::DETACHED_HEAD.to_owned());
+                    self.dialog = Some(Dialog::SwitchBranch { branch, from, leave_changes: true });
+                    self.dialog_opening += 1;
+                } else {
+                    self.run_operation(OperationKind::SwitchBranch, move |path| {
+                        branches::switch(path, &branch)
+                    });
+                }
+            }
+            Action::SwitchBranchWithChanges { branch, leave_changes } => {
+                let from = self.current_branch();
+                self.run_operation(OperationKind::SwitchBranch, move |path| {
+                    if leave_changes {
+                        branches::switch_leaving_changes(path, &branch, from.as_deref())
+                    } else {
+                        branches::switch_bringing_changes(path, &branch, from.as_deref())
+                    }
+                });
             }
             Action::CreateBranch(name) => {
                 self.dialog = None;
@@ -256,6 +280,18 @@ impl DesktopApp {
             Action::DeleteBranch(name) => {
                 self.run_operation(OperationKind::DeleteBranch, move |path| branches::delete(path, &name));
             }
+            Action::PreviewMerge(branch) => {
+                let Some(path) = self.repo_path() else { return };
+                self.tasks.spawn(move || TaskOutput::MergePreview {
+                    result: merge::preview(&path, &branch),
+                    repo: path,
+                    branch,
+                });
+            }
+            Action::Merge(branch) => {
+                self.run_operation(OperationKind::Merge, move |path| merge::merge(path, &branch));
+            }
+            Action::AbortMerge => self.run_operation(OperationKind::AbortMerge, merge::abort),
 
             Action::CreateTag { name, target, message, push } => {
                 let remote_name = self.remote_name().filter(|_| push);
@@ -279,7 +315,11 @@ impl DesktopApp {
             }
 
             Action::StashAll => {
-                self.run_operation(OperationKind::Stash, |path| stash::push_all(path, text::STASH_MESSAGE));
+                // Tied to the branch, as in GitHub Desktop, so it shows up again on that branch.
+                let message = self
+                    .current_branch()
+                    .map_or_else(|| text::STASH_MESSAGE.to_owned(), |b| stash::branch_message(&b));
+                self.run_operation(OperationKind::Stash, move |path| stash::push_all(path, &message));
             }
             Action::RestoreStash(reference) => {
                 self.run_operation(OperationKind::RestoreStash, move |path| stash::pop(path, &reference));
@@ -384,9 +424,17 @@ impl DesktopApp {
             return;
         }
         let message = repo.commit_message();
-        let chosen = repo.included_changes();
+        let merging = repo.snapshot.ready().is_some_and(|snapshot| snapshot.merge_message.is_some());
+        // A merge can only be committed whole: git refuses a partial commit during one.
+        let chosen = if merging { repo.changes().to_vec() } else { repo.included_changes() };
         let all_chosen = chosen.len() == repo.changes().len();
         self.run_operation(OperationKind::Commit, move |path| {
+            if merging {
+                let unresolved = merge::unresolved(path, &chosen);
+                if !unresolved.is_empty() {
+                    return Err(GitError::new(text::unresolved_conflicts(&unresolved)));
+                }
+            }
             changes::commit(path, &message, &chosen, all_chosen)
         });
     }

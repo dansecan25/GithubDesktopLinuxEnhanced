@@ -43,3 +43,8 @@ pub const UNTIMED_GIT_COMMANDS: &[&str] = &["clone", "fetch", "pull", "push", "c
 
 /// Longest pause between checks on whether a timed git command has finished.
 pub const GIT_POLL_MAX: std::time::Duration = std::time::Duration::from_millis(20);
+
+/// Stash message GitHub Desktop uses to tie a stash to a branch: `!!GitHub_Desktop<branch>`. The
+/// same format is used, so stashes made by either app show up on the right branch in both.
+pub const BRANCH_STASH_PREFIX: &str = "!!GitHub_Desktop<";
+pub const BRANCH_STASH_SUFFIX: &str = ">";

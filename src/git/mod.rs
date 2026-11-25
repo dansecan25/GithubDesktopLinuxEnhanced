@@ -4,6 +4,7 @@
 pub mod branches;
 pub mod changes;
 pub mod history;
+pub mod merge;
 pub mod parse;
 pub mod remote;
 pub mod repository;

@@ -46,7 +46,13 @@ Available now:
 - **Stash**: stash all changes (including new files), restore a stash, or discard it.
 - **History**: browse the last 500 commits on the current branch, with their tags, files and diffs.
 - **Branches**: switch, filter, create (names are cleaned up the way GitHub Desktop does) and delete
-  local branches, and check out remote branches.
+  local branches, and check out remote branches. Switching with uncommitted changes asks, as
+  GitHub Desktop does, whether to **leave your changes on the current branch** (they're stashed and
+  show up again under **Stashed changes** when you come back) or **bring them to the new branch**.
+- **Merging**: at the bottom of the branch menu, **Choose a branch to merge into &lt;current&gt;**
+  shows how many commits will come in and which files would conflict before anything changes, then
+  **Create a merge commit**. If there are conflicts, resolve them in your editor and commit to
+  finish the merge, or click **Abort merge**.
 - **Sync**: one button that publishes, pulls, pushes or fetches depending on the branch, with an
   ahead/behind count. A new branch is published to the remote with one click.
 - **Publish repository**: put a local repository on GitHub (public or private) in one step, or

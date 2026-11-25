@@ -1,7 +1,8 @@
 use std::path::Path;
 
-use super::parse;
-use super::runner::{GitResult, run};
+use super::runner::{GitError, GitResult, run};
+use super::{parse, stash};
+use crate::constants::text::{self, STASH_MESSAGE};
 use crate::models::Branch;
 
 pub fn list(path: &Path) -> GitResult<Vec<Branch>> {
@@ -18,6 +19,32 @@ pub fn switch(path: &Path, branch: &Branch) -> GitResult<()> {
         run(path, &["switch", &branch.name])?;
     }
     Ok(())
+}
+
+/// GitHub Desktop's "Leave my changes on <branch>": stashes them, tied to the branch they were on,
+/// then switches. If the switch fails, the changes are put back.
+pub fn switch_leaving_changes(path: &Path, branch: &Branch, from: Option<&str>) -> GitResult<()> {
+    let message = from.map_or_else(|| STASH_MESSAGE.to_owned(), stash::branch_message);
+    let stashed = stash::push_all_checked(path, &message)?;
+    if let Err(error) = switch(path, branch) {
+        if stashed {
+            let _ = stash::pop(path, "stash@{0}");
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
+/// GitHub Desktop's "Bring my changes to <branch>". Git refuses when the changes touch files that
+/// differ on the other branch.
+pub fn switch_bringing_changes(path: &Path, branch: &Branch, from: Option<&str>) -> GitResult<()> {
+    switch(path, branch).map_err(|error| {
+        if error.message.contains("would be overwritten") {
+            GitError::new(text::bring_changes_failed(&branch.name, from.unwrap_or(text::DETACHED_HEAD)))
+        } else {
+            error
+        }
+    })
 }
 
 /// Creates a branch from the current HEAD and switches to it.

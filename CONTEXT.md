@@ -51,12 +51,15 @@ in `Cargo.toml`. Nothing machine-specific belongs in this repository. Use a giti
   `dropdown_menu` for any new menu or clickable row.
 - Diff text can't be selected or copied yet.
 - Commits always include whole files. Line-by-line selection isn't implemented.
-- Merge conflicts are shown with a `!` marker, but there are no conflict resolution tools. Finish the
-  merge in a terminal or editor, then commit here.
+- Merges stopped on conflicts can be finished (commit) or aborted, but there's no built-in conflict
+  editor: files are resolved in the user's editor. Committing is refused while a conflicted file
+  still has conflict markers (`git/merge.rs`). Squash and rebase merges aren't offered.
 - Git operations can't be cancelled, and clone shows a spinner but no progress percentage.
 - A repository whose folder was moved or deleted stays in the list and shows git's error until it is
   removed from the list.
-- All stashes are listed together. GitHub Desktop's one-stash-per-branch model isn't copied.
+- Stashes tied to a branch use GitHub Desktop's message format (`!!GitHub_Desktop<branch>`), so
+  stashes from either app show on the right branch. A branch shows its own stashes plus untagged
+  ones. Unlike GitHub Desktop, a branch can hold more than one stash.
 - Publishing to GitHub creates the repository on the signed-in account only, not in an organization.
 - Tags pushed to the remote aren't tracked: the app doesn't show which tags exist only locally.
 - Signing in needs a personal access token. GitHub's browser (OAuth device) sign-in isn't

@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use super::runner::{GitError, GitResult, run};
-use super::{branches, parse, remote, stash, tags};
+use super::{branches, merge, parse, remote, stash, tags};
 use crate::constants::git::{DEFAULT_BRANCH, GITHUB_HTTPS_PREFIX};
 use crate::models::RepoSnapshot;
 
@@ -76,6 +76,7 @@ pub fn load_snapshot(path: &Path) -> GitResult<RepoSnapshot> {
         tags: tags::list(path)?,
         remote,
         remote_url,
+        merge_message: merge::message(path),
     })
 }
 

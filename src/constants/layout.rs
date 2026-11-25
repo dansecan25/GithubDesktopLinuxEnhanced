@@ -34,3 +34,8 @@ pub const TAB_AS_SPACES: &str = "    ";
 /// (some touchpads send both).
 pub const CLICK_AFTER_RIGHT_CLICK_SECONDS: f64 = 0.4;
 pub const RIGHT_CLICK_MENU_MIN_WIDTH: f32 = 200.0;
+
+/// Height of the branch list in the merge dialog.
+pub const MERGE_BRANCH_LIST_HEIGHT: f32 = 240.0;
+/// Conflicted files listed in the merge dialog before the rest are left out.
+pub const MAX_LISTED_CONFLICTS: usize = 10;

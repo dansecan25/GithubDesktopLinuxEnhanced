@@ -1,6 +1,9 @@
 //! Pure parsers for git's machine-readable output. No process calls here, so everything is testable.
 
-use crate::constants::git::{BINARY_SNIFF_BYTES, FIELD_SEP, MAX_DIFF_BYTES, MAX_DIFF_LINE_BYTES, RECORD_SEP};
+use crate::constants::git::{
+    BINARY_SNIFF_BYTES, BRANCH_STASH_PREFIX, BRANCH_STASH_SUFFIX, FIELD_SEP, MAX_DIFF_BYTES,
+    MAX_DIFF_LINE_BYTES, RECORD_SEP,
+};
 use crate::models::{
     Branch, BranchStatus, ChangeKind, CommitSummary, Diff, DiffLine, DiffLineKind, FileChange, StashEntry,
     Tag,
@@ -165,9 +168,20 @@ pub fn parse_stashes(output: &str) -> Vec<StashEntry> {
         .lines()
         .filter_map(|line| {
             let (reference, message) = line.split_once(FIELD_SEP)?;
-            Some(StashEntry { reference: reference.to_owned(), message: message.to_owned() })
+            Some(StashEntry {
+                reference: reference.to_owned(),
+                message: message.to_owned(),
+                branch: stash_branch(message),
+            })
         })
         .collect()
+}
+
+/// The branch in a stash subject such as `On main: !!GitHub_Desktop<main>`.
+fn stash_branch(subject: &str) -> Option<String> {
+    let start = subject.find(BRANCH_STASH_PREFIX)? + BRANCH_STASH_PREFIX.len();
+    let branch = subject[start..].strip_suffix(BRANCH_STASH_SUFFIX)?;
+    (!branch.is_empty()).then(|| branch.to_owned())
 }
 
 /// The `--format` used by [`parse_tags`]: name, object, and the commit an annotated tag points to.
@@ -416,5 +430,16 @@ mod tests {
         let (text, cut) = truncate_at_char_boundary("ñññ", 3);
         assert!(cut);
         assert_eq!(text, "ñ");
+    }
+
+    #[test]
+    fn stashes_know_their_branch() {
+        let sep = FIELD_SEP;
+        let output = format!(
+            "stash@{{0}}{sep}On feature/x: !!GitHub_Desktop<feature/x>\nstash@{{1}}{sep}On main: wip\n"
+        );
+        let stashes = parse_stashes(&output);
+        assert_eq!(stashes[0].branch.as_deref(), Some("feature/x"));
+        assert_eq!(stashes[1].branch, None);
     }
 }

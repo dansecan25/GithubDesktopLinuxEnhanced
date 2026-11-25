@@ -8,7 +8,7 @@ use eframe::egui;
 
 use crate::constants::text;
 use crate::git::GitResult;
-use crate::models::{CommitSummary, Diff, FileChange, RepoSnapshot};
+use crate::models::{CommitSummary, Diff, FileChange, MergePreview, RepoSnapshot};
 use crate::services::askpass::GitHubAccount;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +20,8 @@ pub enum OperationKind {
     SwitchBranch,
     CreateBranch,
     DeleteBranch,
+    Merge,
+    AbortMerge,
     Stash,
     RestoreStash,
     DropStash,
@@ -41,6 +43,8 @@ impl OperationKind {
             Self::SwitchBranch => text::SWITCHING_BRANCH,
             Self::CreateBranch => text::CREATING_BRANCH,
             Self::DeleteBranch => text::DELETING_BRANCH,
+            Self::Merge => text::MERGING,
+            Self::AbortMerge => text::ABORTING_MERGE,
             Self::Stash => text::STASHING,
             Self::RestoreStash => text::RESTORING_STASH,
             Self::DropStash => text::DROPPING_STASH,
@@ -90,6 +94,11 @@ pub enum TaskOutput {
         result: GitResult<PathBuf>,
         remember_folder: Option<PathBuf>,
     },
+    MergePreview {
+        repo: PathBuf,
+        branch: String,
+        result: GitResult<MergePreview>,
+    },
     /// The saved GitHub account, read from the keychain at startup.
     AccountLoaded(Result<Option<GitHubAccount>, String>),
     SignedIn(Result<GitHubAccount, String>),
@@ -107,6 +116,7 @@ impl TaskOutput {
             Self::CommitDiff { .. } => "showing a commit's diff",
             Self::Operation { .. } => "finishing a git operation",
             Self::RepositoryOpened { .. } => "opening a repository",
+            Self::MergePreview { .. } => "showing a merge preview",
             Self::AccountLoaded(_) | Self::SignedIn(_) | Self::SignedOut(_) => "updating the GitHub account",
         }
     }

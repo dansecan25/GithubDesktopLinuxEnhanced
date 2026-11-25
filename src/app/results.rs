@@ -6,6 +6,7 @@ use super::DesktopApp;
 use crate::services::askpass::GitHubAccount;
 use crate::services::tasks::{OperationKind, TaskOutput};
 use crate::stores::Loadable;
+use crate::ui::dialogs::Dialog;
 
 impl DesktopApp {
     pub(super) fn apply_task(&mut self, output: TaskOutput) {
@@ -72,6 +73,15 @@ impl DesktopApp {
                         self.error = Some(error.message);
                         self.load_snapshot();
                     }
+                }
+            }
+            TaskOutput::MergePreview { repo, branch, result } => {
+                let is_current = self.repo_path().as_ref() == Some(&repo);
+                if let Some(Dialog::Merge(form)) = self.dialog.as_mut()
+                    && is_current
+                    && form.selected.as_deref() == Some(branch.as_str())
+                {
+                    form.preview = Loadable::from_result(result);
                 }
             }
             other => self.apply_repository_data(other),

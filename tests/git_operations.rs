@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use github_desktop_enhanced::git::{branches, changes, history, remote, repository, stash, tags};
+use github_desktop_enhanced::git::{branches, changes, history, merge, remote, repository, stash, tags};
 use github_desktop_enhanced::models::{ChangeKind, FileChange};
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -282,4 +282,106 @@ fn huge_diffs_are_cut_without_reading_all_of_git_output() {
     let change = find(&repo.changes(), "data.txt").clone();
     let diff = changes::working_diff(&repo.0, &change, true).expect("a cut diff, not an error");
     assert!(diff.is_truncated);
+}
+
+/// main with one commit, and `feature` with one more commit that changes `shared.txt`.
+fn repo_with_feature_branch() -> TempRepo {
+    let repo = TempRepo::new();
+    repo.write("shared.txt", "one\n");
+    git(&repo.0, &["add", "."]);
+    git(&repo.0, &["commit", "-m", "first"]);
+    git(&repo.0, &["switch", "-c", "feature"]);
+    repo.write("shared.txt", "one from feature\n");
+    git(&repo.0, &["commit", "-am", "feature change"]);
+    git(&repo.0, &["switch", "main"]);
+    repo
+}
+
+#[test]
+fn merge_preview_and_clean_merge() {
+    let repo = repo_with_feature_branch();
+    let preview = merge::preview(&repo.0, "feature").unwrap();
+    assert_eq!(preview.commits, 1);
+    assert_eq!(preview.conflicts, Some(Vec::new()));
+
+    merge::merge(&repo.0, "feature").unwrap();
+    assert_eq!(std::fs::read_to_string(repo.0.join("shared.txt")).unwrap(), "one from feature\n");
+    assert_eq!(merge::preview(&repo.0, "feature").unwrap().commits, 0);
+    assert!(merge::message(&repo.0).is_none());
+}
+
+#[test]
+fn conflicting_merge_can_be_finished_or_aborted() {
+    let repo = repo_with_feature_branch();
+    repo.write("shared.txt", "one from main\n");
+    git(&repo.0, &["commit", "-am", "main change"]);
+
+    let preview = merge::preview(&repo.0, "feature").unwrap();
+    assert_eq!(preview.conflicts, Some(vec!["shared.txt".to_owned()]));
+
+    let error = merge::merge(&repo.0, "feature").unwrap_err();
+    assert!(error.message.contains("conflicts"), "{}", error.message);
+    let snapshot = repository::load_snapshot(&repo.0).unwrap();
+    assert_eq!(snapshot.merge_message.as_deref(), Some("Merge branch 'feature'"));
+    assert_eq!(merge::unresolved(&repo.0, &snapshot.changes), ["shared.txt"]);
+
+    // Aborting goes back to main's version.
+    merge::abort(&repo.0).unwrap();
+    assert!(merge::message(&repo.0).is_none());
+    assert_eq!(std::fs::read_to_string(repo.0.join("shared.txt")).unwrap(), "one from main\n");
+
+    // Resolving and committing finishes the merge.
+    let _ = merge::merge(&repo.0, "feature");
+    repo.write("shared.txt", "one from both\n");
+    let changes = repo.changes();
+    assert!(merge::unresolved(&repo.0, &changes).is_empty());
+    changes::commit(&repo.0, "Merge branch 'feature'", &changes, true).unwrap();
+    assert!(merge::message(&repo.0).is_none());
+    assert_eq!(merge::preview(&repo.0, "feature").unwrap().commits, 0);
+}
+
+fn branch(name: &str) -> github_desktop_enhanced::models::Branch {
+    github_desktop_enhanced::models::Branch {
+        name: name.to_owned(),
+        is_remote: false,
+        is_current: false,
+        upstream: None,
+    }
+}
+
+#[test]
+fn switching_can_leave_changes_on_the_branch() {
+    let repo = repo_with_feature_branch();
+    repo.write("shared.txt", "work in progress on main\n");
+    repo.write("new.txt", "untracked\n");
+
+    branches::switch_leaving_changes(&repo.0, &branch("feature"), Some("main")).unwrap();
+    assert_eq!(std::fs::read_to_string(repo.0.join("shared.txt")).unwrap(), "one from feature\n");
+    assert!(!repo.0.join("new.txt").exists());
+    let stashes = stash::list(&repo.0).unwrap();
+    assert_eq!(stashes.len(), 1);
+    assert_eq!(stashes[0].branch.as_deref(), Some("main"));
+
+    // Back on main, the changes are restored from the stash left there.
+    branches::switch(&repo.0, &branch("main")).unwrap();
+    stash::pop(&repo.0, &stashes[0].reference).unwrap();
+    assert_eq!(std::fs::read_to_string(repo.0.join("shared.txt")).unwrap(), "work in progress on main\n");
+    assert!(repo.0.join("new.txt").exists());
+}
+
+#[test]
+fn switching_can_bring_changes_unless_they_conflict() {
+    let repo = repo_with_feature_branch();
+
+    // A new file comes along to the other branch.
+    repo.write("notes.txt", "notes\n");
+    branches::switch_bringing_changes(&repo.0, &branch("feature"), Some("main")).unwrap();
+    assert!(repo.0.join("notes.txt").exists());
+    branches::switch(&repo.0, &branch("main")).unwrap();
+
+    // A change to a file that differs on feature can't come along, and nothing is lost.
+    repo.write("shared.txt", "edited on main\n");
+    let error = branches::switch_bringing_changes(&repo.0, &branch("feature"), Some("main")).unwrap_err();
+    assert!(error.message.contains("Leave my changes on main"), "{}", error.message);
+    assert_eq!(std::fs::read_to_string(repo.0.join("shared.txt")).unwrap(), "edited on main\n");
 }

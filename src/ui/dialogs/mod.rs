@@ -1,5 +1,6 @@
 //! Modal dialogs. Each holds its own form state and turns a confirmed form into an [`Action`].
 
+mod merge;
 mod preferences;
 mod prompt;
 mod publish;
@@ -7,10 +8,11 @@ mod tag;
 
 use std::path::PathBuf;
 
-use eframe::egui::{self, Ui};
+use eframe::egui::{self, RichText, Ui};
 
 use crate::constants::text;
 use crate::git::branches::sanitize_name;
+use crate::models::Branch;
 use crate::services::editor::Editor;
 use crate::services::settings::Settings;
 use crate::services::update;
@@ -18,6 +20,7 @@ use crate::ui::actions::Action;
 use crate::ui::components::{
     DialogResult, danger_button, dialog, field_label, folder_picker, primary_button, secondary_button,
 };
+use crate::ui::theme;
 
 #[derive(Debug, Clone)]
 pub struct Confirmation {
@@ -38,6 +41,8 @@ pub enum Dialog {
     Publish { name: String, description: String, private: bool, remote_url: String },
     CreateTag(tag::TagForm),
     DeleteTag { name: String, has_remote: bool },
+    Merge(MergeForm),
+    SwitchBranch { branch: Branch, from: String, leave_changes: bool },
 }
 
 /// Read-only app state some dialogs show.
@@ -52,6 +57,7 @@ pub struct DialogContext<'a> {
     pub opening: u64,
 }
 
+pub use merge::MergeForm;
 pub use prompt::show_prompt;
 pub use tag::TagForm;
 
@@ -201,6 +207,30 @@ pub fn show(
         Dialog::DeleteTag { name, has_remote } => dialog(ctx, "delete-tag", text::DELETE_TAG, |ui| {
             tag::show_delete(ui, busy, name, *has_remote, actions);
         }),
+        Dialog::SwitchBranch { branch, from, leave_changes } => {
+            dialog(ctx, "switch-branch", text::SWITCH_BRANCH_TITLE, |ui| {
+                ui.label(text::SWITCH_WITH_CHANGES_BODY);
+                ui.add_space(8.0);
+                choice(ui, leave_changes, true, &text::leave_changes_on(from), text::LEAVE_CHANGES_HINT);
+                choice(
+                    ui,
+                    leave_changes,
+                    false,
+                    &text::bring_changes_to(&branch.name),
+                    text::BRING_CHANGES_HINT,
+                );
+                if footer_buttons(ui, text::SWITCH_BRANCH_BUTTON, !busy, true, actions) {
+                    actions.push(Action::CloseDialog);
+                    actions.push(Action::SwitchBranchWithChanges {
+                        branch: branch.clone(),
+                        leave_changes: *leave_changes,
+                    });
+                }
+            })
+        }
+        Dialog::Merge(form) => dialog(ctx, "merge", &text::merge_title(&form.into), |ui| {
+            merge::show(ui, context, form, actions);
+        }),
     };
     if matches!(result, DialogResult::Closed) {
         actions.push(Action::CloseDialog);
@@ -226,6 +256,18 @@ pub(super) fn footer_buttons(
         submitted
     })
     .inner
+}
+
+/// A radio option with a muted explanation under it.
+fn choice(ui: &mut Ui, current: &mut bool, value: bool, label: &str, hint: &str) {
+    ui.radio_value(current, value, label);
+    let muted = theme::palette(ui.visuals()).muted_text;
+    ui.horizontal(|ui| {
+        // Lines the hint up with the label, past the radio button.
+        ui.add_space(ui.spacing().icon_width + ui.spacing().icon_spacing);
+        ui.add(egui::Label::new(RichText::new(hint).color(muted)).wrap());
+    });
+    ui.add_space(4.0);
 }
 
 /// Focuses a dialog's first field once per opening. `opening` changes every time a dialog opens.

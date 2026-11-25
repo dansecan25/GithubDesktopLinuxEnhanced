@@ -41,6 +41,12 @@ impl RepoStore {
             self.selected_file = None;
             self.working_diff = Loadable::Idle;
         }
+        // Like GitHub Desktop, a merge stopped on conflicts gets git's prepared summary.
+        if let Some(message) = &snapshot.merge_message
+            && self.commit_summary.trim().is_empty()
+        {
+            self.commit_summary.clone_from(message);
+        }
         self.snapshot = Loadable::Ready(snapshot);
     }
 

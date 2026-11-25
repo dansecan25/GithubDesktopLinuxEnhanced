@@ -38,6 +38,7 @@ src/
     remote.rs        Fetch, pull, push / publish, add a remote
     stash.rs         List, stash all, restore, drop
     tags.rs          List, create (lightweight or annotated), push, delete
+    merge.rs         Merge preview (commits, conflicts), merge, abort, unresolved conflict check
   github/            GitHub REST API: check a token, create a repository, latest release
   services/          Non-UI services
     tasks.rs         Background threads and the result channel

@@ -19,8 +19,30 @@ pub fn changes_list(ui: &mut Ui, repo: &mut RepoStore, view: &ViewContext<'_>, a
         return loadable_status(ui, &repo.snapshot);
     };
     let branch = snapshot.status.head.clone().unwrap_or_else(|| text::DETACHED_HEAD.to_owned());
-    let has_stashes = !snapshot.stashes.is_empty();
-    let stashes = snapshot.stashes.clone();
+    // Like GitHub Desktop, a branch only shows the changes left on it (plus stashes made elsewhere).
+    let stashes: Vec<_> = snapshot
+        .stashes
+        .iter()
+        .filter(|stash| stash.branch.is_none() || stash.branch == snapshot.status.head)
+        .cloned()
+        .collect();
+    let has_stashes = !stashes.is_empty();
+
+    if snapshot.merge_message.is_some() {
+        egui::Panel::top("merge-in-progress")
+            .frame(egui::Frame::new().inner_margin(egui::Margin::same(PANEL_PADDING)))
+            .show(ui, |ui| {
+                ui.add(egui::Label::new(RichText::new(text::MERGE_IN_PROGRESS).strong()).wrap());
+                if secondary_button(ui, text::ABORT_MERGE, !busy).clicked() {
+                    actions.push(Action::OpenDialog(Dialog::confirm(
+                        text::ABORT_MERGE,
+                        text::ABORT_MERGE_BODY.to_owned(),
+                        text::ABORT_MERGE,
+                        Action::AbortMerge,
+                    )));
+                }
+            });
+    }
 
     egui::Panel::bottom("commit-form")
         .frame(egui::Frame::new().inner_margin(egui::Margin::same(PANEL_PADDING)))
@@ -34,7 +56,11 @@ pub fn changes_list(ui: &mut Ui, repo: &mut RepoStore, view: &ViewContext<'_>, a
                     .default_open(true)
                     .show(ui, |ui| {
                         for stash in &stashes {
-                            ui.label(&stash.message);
+                            let label = match &stash.branch {
+                                Some(branch) => text::changes_left_on(branch),
+                                None => stash.message.clone(),
+                            };
+                            ui.label(&label);
                             ui.horizontal(|ui| {
                                 if secondary_button(ui, text::RESTORE_STASH, !busy).clicked() {
                                     actions.push(Action::RestoreStash(stash.reference.clone()));
@@ -42,7 +68,7 @@ pub fn changes_list(ui: &mut Ui, repo: &mut RepoStore, view: &ViewContext<'_>, a
                                 if secondary_button(ui, text::DISCARD_STASH, !busy).clicked() {
                                     actions.push(Action::OpenDialog(Dialog::confirm(
                                         text::DISCARD_STASH,
-                                        text::drop_stash_body(&stash.message),
+                                        text::drop_stash_body(&label),
                                         text::DELETE_BUTTON,
                                         Action::DropStash(stash.reference.clone()),
                                     )));

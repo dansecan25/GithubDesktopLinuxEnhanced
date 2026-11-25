@@ -8,7 +8,7 @@ use crate::services::settings::ThemeChoice;
 use crate::stores::RepoStore;
 use crate::ui::actions::Action;
 use crate::ui::components::{dropdown_menu, left_clicked, right_click_menu, toolbar_button};
-use crate::ui::dialogs::Dialog;
+use crate::ui::dialogs::{Dialog, MergeForm};
 use crate::ui::theme::{self, TOOLBAR_TEXT};
 use crate::utils::paths::display_name;
 
@@ -155,6 +155,18 @@ fn branch_menu(
                     }
                 }
             });
+            // As in GitHub Desktop, merging lives at the bottom of the branch list.
+            ui.separator();
+            let can_merge = snapshot.status.head.is_some()
+                && snapshot.status.has_commits
+                && snapshot.merge_message.is_none();
+            let merge = egui::Button::new(text::merge_into(&current))
+                .wrap()
+                .min_size(egui::vec2(ui.available_width(), MIN_TARGET_SIZE));
+            if ui.add_enabled(can_merge, merge).clicked() {
+                actions.push(Action::OpenDialog(Dialog::Merge(MergeForm::new(&current, &snapshot.branches))));
+                ui.close();
+            }
         });
 }
 
