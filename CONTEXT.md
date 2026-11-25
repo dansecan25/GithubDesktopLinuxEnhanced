@@ -78,6 +78,12 @@ in `Cargo.toml`. Nothing machine-specific belongs in this repository. Use a giti
   `components::rounded`. Use it for any new checkbox.
 - Cancelling sends git SIGTERM (so clone removes its half-made folder), then SIGKILL after 5 s. Only
   fetch, pull, push, publish, tag pushes and clone can be cancelled.
+- `askpass::automatic_answer` gives the github.com token only to prompts for `https://github.com`
+  exactly (host parsed, port 443 at most). Up to 0.1.0 it matched `//github.com` as a substring, so
+  a remote like `https://github.com.example.net` would have received the token; fixed for 0.2.0.
+- GitHub Enterprise Server and `*.ghe.com` aren't supported beyond plain git: the API base, OAuth
+  and `github::web_url` are fixed to github.com. Supporting them needs a per-account host, API base
+  and OAuth app, and the token kept per host.
 - The OAuth app (Client ID in `constants/github.rs`) has only Device Flow enabled: no client secret,
   no expiring tokens, no wildcard redirects. Its name on GitHub is "Git Desktop Linux Enhanced".
 - Pull requests show the conversation (issue comments) and a checks summary. Review comments on

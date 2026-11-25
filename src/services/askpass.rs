@@ -61,12 +61,15 @@ pub fn is_secret_prompt(prompt: &str) -> bool {
 }
 
 /// Answers git's own GitHub prompts with the saved account, so a signed-in user is never asked.
+///
+/// Only for `https://github.com` exactly: the token must never go to another host (including
+/// look-alikes such as `github.com.example.net`, or GitHub Enterprise servers) or over plain HTTP.
 pub fn automatic_answer(prompt: &str, account: Option<&GitHubAccount>) -> Option<String> {
     let account = account?;
-    let lower = prompt.to_lowercase();
-    if !lower.contains(&format!("//{GITHUB_HOST}")) && !lower.contains(&format!("@{GITHUB_HOST}")) {
+    if !is_github_https(prompt) {
         return None;
     }
+    let lower = prompt.to_lowercase();
     if lower.starts_with("username") {
         Some(account.login.clone())
     } else if lower.starts_with("password") {
@@ -74,6 +77,17 @@ pub fn automatic_answer(prompt: &str, account: Option<&GitHubAccount>) -> Option
     } else {
         None
     }
+}
+
+/// True when git's prompt (`Password for 'https://user@github.com': `) is for `https://github.com`.
+fn is_github_https(prompt: &str) -> bool {
+    let Some(url) = prompt.split('\'').nth(1) else { return false };
+    let Some(rest) = url.strip_prefix("https://") else { return false };
+    // `user@host`, possibly with a path or port after the host.
+    let authority = rest.split('/').next().unwrap_or_default();
+    let host = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
+    let host = host.strip_suffix(":443").unwrap_or(host);
+    host.eq_ignore_ascii_case(GITHUB_HOST)
 }
 
 pub struct AskpassServer {
@@ -240,6 +254,22 @@ mod tests {
         assert_eq!(automatic_answer(user, Some(&account)).as_deref(), Some("octo"));
         assert_eq!(automatic_answer(pass, Some(&account)).as_deref(), Some("secret"));
         assert_eq!(automatic_answer("Username for 'https://gitlab.com': ", Some(&account)), None);
+        // Look-alike hosts, other GitHub servers and plain HTTP never get the token.
+        for prompt in [
+            "Password for 'https://octo@github.com.evil.example': ",
+            "Password for 'https://github.com.evil.example': ",
+            "Password for 'https://evil.example/github.com': ",
+            "Password for 'https://github.mycompany.com': ",
+            "Password for 'https://octo@github.com@evil.example': ",
+            "Password for 'http://octo@github.com': ",
+            "Password for 'https://github.com:8443': ",
+        ] {
+            assert_eq!(automatic_answer(prompt, Some(&account)), None, "{prompt}");
+        }
+        assert_eq!(
+            automatic_answer("Password for 'https://GitHub.com:443': ", Some(&account)).as_deref(),
+            Some("secret")
+        );
         assert_eq!(automatic_answer(user, None), None);
         assert_eq!(
             automatic_answer("Enter passphrase for key '/home/x/.ssh/id_ed25519': ", Some(&account)),

@@ -141,6 +141,16 @@ Signing out removes it. Your own git setup keeps working too: a
 [credential helper](https://git-scm.com/doc/credential-helpers) or an `ssh-agent` key is used
 first, and anything git still needs to ask is shown as a dialog.
 
+### GitHub Enterprise
+
+- **GitHub Enterprise Cloud on github.com** works like any github.com account. If your organization
+  uses SAML single sign-on, authorize the sign-in for it on GitHub; if it restricts OAuth apps, an
+  owner has to approve the app before browser sign-in can see its repositories.
+- **GitHub Enterprise Server** and **Enterprise Cloud with data residency (`*.ghe.com`)** aren't
+  supported for GitHub features: sign-in, publishing, organizations and pull requests only talk to
+  github.com. Plain git (clone, commit, branches, merge, push and pull) works with your own
+  credential helper or SSH keys, and the app never sends your github.com token to those servers.
+
 ### Releasing with tags
 
 To release a new version of a project: open the branch menu and choose **New tag on current
