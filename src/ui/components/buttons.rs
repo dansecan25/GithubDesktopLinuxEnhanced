@@ -1,7 +1,7 @@
 use eframe::egui::{self, Button, Response, RichText, Ui};
 
-use crate::constants::layout::MIN_TARGET_SIZE;
-use crate::ui::theme::{self, TOOLBAR_TEXT};
+use crate::constants::layout::{CHECKBOX_RADIUS, MIN_TARGET_SIZE, SEPARATOR_HALF_WIDTH, TOOLBAR_MARGIN};
+use crate::ui::theme::{self, TOOLBAR_HOVER, TOOLBAR_TEXT};
 
 fn sized(button: Button<'_>) -> Button<'_> {
     button.min_size(egui::vec2(MIN_TARGET_SIZE, MIN_TARGET_SIZE))
@@ -27,5 +27,50 @@ pub fn danger_button(ui: &mut Ui, text: &str, enabled: bool) -> Response {
 pub fn toolbar_button(ui: &mut Ui, caption: &str, value: &str, enabled: bool) -> Response {
     let text = format!("{caption}\n{value}");
     let label = RichText::new(text).color(TOOLBAR_TEXT);
-    ui.add_enabled(enabled, sized(Button::new(label).frame(false)))
+    // The repository, branch and sync buttons sit between separators.
+    let reach = toolbar_reach(ui, true, true);
+    with_hover_shading(ui, reach, |ui| ui.add_enabled(enabled, sized(Button::new(label).frame(false))))
+}
+
+/// Adds a frameless toolbar button, shaded while the pointer is over it or it is pressed. The
+/// shading is square and reaches past the button by `reach` (to the separator lines and the
+/// toolbar's edges), and is drawn behind it, in a slot reserved before it.
+pub fn with_hover_shading(
+    ui: &mut Ui,
+    reach: egui::Margin,
+    add: impl FnOnce(&mut Ui) -> Response,
+) -> Response {
+    let slot = ui.painter().add(egui::Shape::Noop);
+    let response = add(ui);
+    if response.enabled() && (response.hovered() || response.is_pointer_button_down_on()) {
+        let area = response.rect + reach;
+        ui.painter().set(slot, egui::Shape::rect_filled(area, 0.0, TOOLBAR_HOVER));
+    }
+    response
+}
+
+/// How far toolbar shading reaches on each side of a button: to the separator lines, or half the
+/// gap to a neighbour without one.
+pub fn toolbar_reach(ui: &Ui, separator_left: bool, separator_right: bool) -> egui::Margin {
+    let gap = ui.spacing().item_spacing.x;
+    let side = |separator: bool| if separator { gap + SEPARATOR_HALF_WIDTH } else { gap / 2.0 };
+    let vertical = TOOLBAR_MARGIN.y as i8;
+    egui::Margin {
+        left: side(separator_left) as i8,
+        right: side(separator_right) as i8,
+        top: vertical,
+        bottom: vertical,
+    }
+}
+
+/// Draws `add` (a checkbox) with rounded corners; every other widget is square.
+pub fn rounded<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.scope(|ui| {
+        let widgets = &mut ui.visuals_mut().widgets;
+        for state in [&mut widgets.inactive, &mut widgets.hovered, &mut widgets.active] {
+            state.corner_radius = egui::CornerRadius::same(CHECKBOX_RADIUS);
+        }
+        add(ui)
+    })
+    .inner
 }

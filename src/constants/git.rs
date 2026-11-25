@@ -53,3 +53,13 @@ pub const BRANCH_STASH_SUFFIX: &str = ">";
 /// build folder missing from `.gitignore`, and git would need gigabytes of memory to store it.
 pub const MAX_UNTRACKED_BYTES: u64 = 1024 * 1024 * 1024;
 pub const MAX_UNTRACKED_FILES: usize = 50_000;
+
+/// How long a cancelled git command gets to clean up before it is killed.
+pub const GIT_STOP_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Image files bigger than this aren't previewed.
+pub const MAX_PREVIEW_FILE_BYTES: usize = 50 * 1024 * 1024;
+/// Images with more pixels than this aren't decoded: a huge image would need gigabytes of memory.
+pub const MAX_PREVIEW_PIXELS: u64 = 60_000_000;
+/// File extensions shown as pictures in the diff.
+pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "webp", "gif", "bmp", "ico"];

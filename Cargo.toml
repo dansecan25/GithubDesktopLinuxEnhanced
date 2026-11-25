@@ -11,6 +11,7 @@ publish = false
 [dependencies]
 dirs = "7"
 eframe = "0.37"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp", "ico"] }
 keyring = "4.2"
 rfd = { version = "0.18", default-features = false, features = ["xdg-portal"] }
 serde = { version = "1", features = ["derive"] }

@@ -2,20 +2,23 @@
 
 use std::path::PathBuf;
 
-use crate::models::{Branch, FileChange};
+use crate::models::{Branch, ConflictChoice, FileChange};
 use crate::services::settings::ThemeChoice;
-use crate::ui::dialogs::Dialog;
+use crate::ui::dialogs::{Dialog, PullForm};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tab {
     #[default]
     Changes,
     History,
+    PullRequests,
 }
 
 #[derive(Debug, Clone)]
 pub enum Action {
     OpenDialog(Dialog),
+    /// Stops the running fetch, pull, push, publish or clone.
+    CancelOperation,
     CloseDialog,
     /// Answers the pending git or ssh credential prompt. `None` cancels it.
     AnswerPrompt(Option<String>),
@@ -39,6 +42,19 @@ pub enum Action {
     SetEditor(Option<String>),
     SetAutoUpdate(bool),
     SignIn(String),
+    /// Starts GitHub's device flow: a code to enter on github.com.
+    StartBrowserSignIn,
+
+    LoadPulls,
+    SelectPull(u64),
+    /// Fetches the pull request's branch and switches to it.
+    CheckoutPull(u64),
+    PostComment {
+        number: u64,
+        body: String,
+    },
+    OpenCreatePull,
+    CreatePull(PullForm),
     SignOut,
     CheckForUpdates,
     InstallUpdate,
@@ -64,6 +80,8 @@ pub enum Action {
         name: String,
         description: String,
         private: bool,
+        /// `None` publishes to the signed-in account.
+        organization: Option<String>,
     },
     AddRemote(String),
     /// Switches right away when there are no changes, otherwise asks what to do with them.
@@ -79,6 +97,18 @@ pub enum Action {
     PreviewMerge(String),
     Merge(String),
     AbortMerge,
+    /// Resolves one conflict block of a file with your side, theirs or both.
+    ResolveConflict {
+        file: String,
+        index: usize,
+        choice: ConflictChoice,
+    },
+    /// Takes the whole file from your side (`ours`) or theirs, and marks it resolved.
+    TakeConflictSide {
+        file: String,
+        ours: bool,
+    },
+    MarkResolved(String),
 
     CreateTag {
         name: String,

@@ -104,16 +104,16 @@ pub fn parse_name_status(output: &str) -> Vec<FileChange> {
     changes
 }
 
-/// The `--format` used by [`parse_log`]: sha, short sha, author, relative date, subject, body.
+/// The `--format` used by [`parse_log`]: sha, short sha, author, email, relative date, subject, body.
 pub fn log_format() -> String {
-    format!("%H{FIELD_SEP}%h{FIELD_SEP}%an{FIELD_SEP}%ar{FIELD_SEP}%s{FIELD_SEP}%b{RECORD_SEP}")
+    format!("%H{FIELD_SEP}%h{FIELD_SEP}%an{FIELD_SEP}%ae{FIELD_SEP}%ar{FIELD_SEP}%s{FIELD_SEP}%b{RECORD_SEP}")
 }
 
 pub fn parse_log(output: &str) -> Vec<CommitSummary> {
     output
         .split(RECORD_SEP)
         .filter_map(|record| {
-            let mut fields = record.trim_start_matches('\n').splitn(6, FIELD_SEP);
+            let mut fields = record.trim_start_matches('\n').splitn(7, FIELD_SEP);
             let sha = fields.next()?.trim();
             if sha.is_empty() {
                 return None;
@@ -122,6 +122,7 @@ pub fn parse_log(output: &str) -> Vec<CommitSummary> {
                 sha: sha.to_owned(),
                 short_sha: fields.next()?.to_owned(),
                 author: fields.next()?.to_owned(),
+                author_email: fields.next()?.to_owned(),
                 relative_date: fields.next()?.to_owned(),
                 summary: fields.next()?.to_owned(),
                 body: fields.next().unwrap_or_default().trim().to_owned(),
@@ -267,7 +268,7 @@ pub fn diff_for_new_file(content: &str) -> Diff {
             new_number: Some(number),
         })
         .collect();
-    Diff { lines, is_binary: false, is_truncated }
+    Diff { lines, is_binary: false, is_truncated, image: None }
 }
 
 /// Like git: a NUL byte near the start means binary. Content that isn't UTF-8 is treated as binary
@@ -359,13 +360,14 @@ mod tests {
         let s = FIELD_SEP;
         let r = RECORD_SEP;
         let output = format!(
-            "aaa{s}a{s}Ana{s}2 days ago{s}First{s}line one\nline two\n{r}\nbbb{s}b{s}Bo{s}now{s}Second{s}{r}\n"
+            "aaa{s}a{s}Ana{s}ana@x.y{s}2 days ago{s}First{s}line one\nline two\n{r}\nbbb{s}b{s}Bo{s}bo@x.y{s}now{s}Second{s}{r}\n"
         );
         let commits = parse_log(&output);
         assert_eq!(commits.len(), 2);
         assert_eq!(commits[0].body, "line one\nline two");
         assert_eq!(commits[1].summary, "Second");
         assert_eq!(commits[1].body, "");
+        assert_eq!(commits[1].author_email, "bo@x.y");
     }
 
     #[test]

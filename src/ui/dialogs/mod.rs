@@ -4,21 +4,25 @@ mod merge;
 mod preferences;
 mod prompt;
 mod publish;
+mod pull;
 mod tag;
 
 use std::path::PathBuf;
 
 use eframe::egui::{self, RichText, Ui};
 
+use crate::constants::layout::SIGN_IN_CODE_SIZE;
 use crate::constants::text;
 use crate::git::branches::sanitize_name;
+use crate::git::control::GitProgress;
 use crate::models::Branch;
 use crate::services::editor::Editor;
 use crate::services::settings::Settings;
 use crate::services::update;
 use crate::ui::actions::Action;
 use crate::ui::components::{
-    DialogResult, danger_button, dialog, field_label, folder_picker, primary_button, secondary_button,
+    DialogResult, danger_button, dialog, field_label, folder_picker, operation_status, primary_button,
+    secondary_button,
 };
 use crate::ui::theme;
 
@@ -32,17 +36,45 @@ pub struct Confirmation {
 
 #[derive(Debug, Clone)]
 pub enum Dialog {
-    AddRepository { path: String },
-    CloneRepository { url: String, parent: String },
-    CreateRepository { name: String, parent: String },
-    CreateBranch { name: String, from: String },
+    AddRepository {
+        path: String,
+    },
+    CloneRepository {
+        url: String,
+        parent: String,
+    },
+    CreateRepository {
+        name: String,
+        parent: String,
+    },
+    CreateBranch {
+        name: String,
+        from: String,
+    },
     Confirm(Confirmation),
-    Preferences { token: String, custom_editor: String, custom_mode: bool },
-    Publish { name: String, description: String, private: bool, remote_url: String },
+    Preferences {
+        token: String,
+        custom_editor: String,
+        custom_mode: bool,
+    },
+    Publish(publish::PublishForm),
     CreateTag(tag::TagForm),
-    DeleteTag { name: String, has_remote: bool },
+    DeleteTag {
+        name: String,
+        has_remote: bool,
+    },
     Merge(MergeForm),
-    SwitchBranch { branch: Branch, from: String, leave_changes: bool },
+    SwitchBranch {
+        branch: Branch,
+        from: String,
+        leave_changes: bool,
+    },
+    /// Browser sign-in: the code to enter on GitHub while the app waits.
+    BrowserSignIn {
+        user_code: String,
+        verification_uri: String,
+    },
+    CreatePull(PullForm),
 }
 
 /// Read-only app state some dialogs show.
@@ -53,12 +85,20 @@ pub struct DialogContext<'a> {
     pub can_update: bool,
     pub signing_in: bool,
     pub busy: bool,
+    /// The running operation's label and git's progress, shown in dialogs that wait for it (clone).
+    pub operation: Option<&'a str>,
+    pub progress: Option<GitProgress>,
+    pub can_cancel: bool,
+    /// A pull request or comment is being sent to GitHub.
+    pub sending: bool,
     /// Changes every time a dialog opens, so dialogs can focus their first field once.
     pub opening: u64,
 }
 
 pub use merge::MergeForm;
 pub use prompt::show_prompt;
+pub use publish::PublishForm;
+pub use pull::PullForm;
 pub use tag::TagForm;
 
 impl Dialog {
@@ -88,12 +128,7 @@ impl Dialog {
     }
 
     pub fn publish(repository_name: &str) -> Self {
-        Self::Publish {
-            name: repository_name.to_owned(),
-            description: String::new(),
-            private: true,
-            remote_url: String::new(),
-        }
+        Self::Publish(publish::PublishForm::new(repository_name))
     }
 
     pub fn confirm(title: &str, body: String, confirm_label: &str, action: Action) -> Self {
@@ -135,6 +170,12 @@ pub fn show(
             focus_once(ui, &field, opening);
             field_label(ui, text::CLONE_INTO);
             folder_picker(ui, parent);
+            if let Some(operation) = context.operation {
+                ui.add_space(8.0);
+                if operation_status(ui, operation, context.progress.as_ref(), context.can_cancel, None) {
+                    actions.push(Action::CancelOperation);
+                }
+            }
             let ready = !url.trim().is_empty() && !parent.trim().is_empty() && !busy;
             if footer_buttons(ui, text::CLONE_BUTTON, ready, true, actions) {
                 actions.push(Action::CloneRepository {
@@ -195,12 +236,9 @@ pub fn show(
                 preferences::show(ui, context, token, custom_editor, custom_mode, actions);
             })
         }
-        Dialog::Publish { name, description, private, remote_url } => {
-            dialog(ctx, "publish", text::PUBLISH_TITLE, |ui| {
-                let form = publish::PublishForm { name, description, private, remote_url };
-                publish::show(ui, context, form, actions);
-            })
-        }
+        Dialog::Publish(form) => dialog(ctx, "publish", text::PUBLISH_TITLE, |ui| {
+            publish::show(ui, context, form, actions);
+        }),
         Dialog::CreateTag(form) => dialog(ctx, "create-tag", text::CREATE_TAG_TITLE, |ui| {
             tag::show_create(ui, context, form, actions);
         }),
@@ -228,6 +266,28 @@ pub fn show(
                 }
             })
         }
+        Dialog::BrowserSignIn { user_code, verification_uri } => {
+            dialog(ctx, "browser-sign-in", text::BROWSER_SIGN_IN_TITLE, |ui| {
+                ui.add(egui::Label::new(text::BROWSER_SIGN_IN_STEPS).wrap());
+                ui.add_space(8.0);
+                ui.label(RichText::new(user_code.as_str()).monospace().size(SIGN_IN_CODE_SIZE).strong());
+                ui.add_space(8.0);
+                if primary_button(ui, text::COPY_CODE_AND_OPEN, true).clicked() {
+                    actions.push(Action::CopyText(user_code.clone()));
+                    actions.push(Action::OpenUrl(verification_uri.clone()));
+                }
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(text::WAITING_FOR_GITHUB);
+                });
+                if secondary_button(ui, text::CANCEL, true).clicked() {
+                    actions.push(Action::CloseDialog);
+                }
+            })
+        }
+        Dialog::CreatePull(form) => dialog(ctx, "create-pull", text::CREATE_PULL_TITLE, |ui| {
+            pull::show(ui, context, form, actions);
+        }),
         Dialog::Merge(form) => dialog(ctx, "merge", &text::merge_title(&form.into), |ui| {
             merge::show(ui, context, form, actions);
         }),

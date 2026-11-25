@@ -4,7 +4,7 @@ use super::{DialogContext, focus_once, footer_buttons};
 use crate::constants::layout::COMMIT_DESCRIPTION_ROWS;
 use crate::constants::text;
 use crate::ui::actions::Action;
-use crate::ui::components::{danger_button, field_label, muted_text, secondary_button};
+use crate::ui::components::{danger_button, field_label, muted_text, rounded, secondary_button};
 use crate::utils::version::next_versions;
 
 #[derive(Debug, Clone)]
@@ -55,7 +55,7 @@ pub fn show_create(ui: &mut Ui, context: &DialogContext<'_>, form: &mut TagForm,
             .desired_width(f32::INFINITY),
     );
     if form.has_remote {
-        ui.checkbox(&mut form.push, text::TAG_PUSH);
+        rounded(ui, |ui| ui.checkbox(&mut form.push, text::TAG_PUSH));
         ui.label(muted_text(ui, text::TAG_RELEASE_HINT));
     }
     let ready = !form.name.trim().is_empty() && !context.busy;

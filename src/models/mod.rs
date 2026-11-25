@@ -1,17 +1,21 @@
 mod branch;
 mod change;
 mod commit;
+mod conflict;
 mod diff;
 mod merge;
+mod pull;
 mod snapshot;
 mod stash;
 mod tag;
 
 pub use branch::Branch;
 pub use change::{ChangeKind, FileChange};
-pub use commit::CommitSummary;
-pub use diff::{Diff, DiffLine, DiffLineKind};
+pub use commit::{CoAuthor, CommitSummary};
+pub use conflict::{ConflictBlock, ConflictChoice, ConflictFile, Segment};
+pub use diff::{Diff, DiffLine, DiffLineKind, ImagePair, ImageSide, LineSelection, LineToggle, PreviewImage};
 pub use merge::MergePreview;
+pub use pull::{Checks, PullComment, PullDetail, PullList, PullRequest};
 pub use snapshot::{BranchStatus, RepoSnapshot};
 pub use stash::StashEntry;
 pub use tag::Tag;

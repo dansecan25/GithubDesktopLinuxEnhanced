@@ -3,7 +3,7 @@ use std::path::Path;
 use super::runner::{GitError, GitResult, run};
 use crate::constants::git::DEFAULT_REMOTE;
 use crate::constants::text;
-use crate::models::BranchStatus;
+use crate::models::{Branch, BranchStatus, PullRequest};
 
 /// `origin` when it exists, otherwise the first configured remote.
 pub fn preferred_remote(path: &Path) -> GitResult<Option<String>> {
@@ -14,20 +14,20 @@ pub fn preferred_remote(path: &Path) -> GitResult<Option<String>> {
 }
 
 pub fn fetch(path: &Path) -> GitResult<()> {
-    run(path, &["fetch", "--all", "--prune"])?;
+    run(path, &["fetch", "--progress", "--all", "--prune"])?;
     Ok(())
 }
 
 /// Pulls with the user's own `pull.rebase` / `pull.ff` configuration.
 pub fn pull(path: &Path) -> GitResult<()> {
-    run(path, &["pull"])?;
+    run(path, &["pull", "--progress"])?;
     Ok(())
 }
 
 /// Pushes, and publishes the branch with `--set-upstream` the first time.
 pub fn push(path: &Path, status: &BranchStatus, remote: Option<&str>) -> GitResult<()> {
     if status.upstream.is_some() {
-        run(path, &["push"])?;
+        run(path, &["push", "--progress"])?;
         return Ok(());
     }
     if !status.has_commits {
@@ -36,8 +36,27 @@ pub fn push(path: &Path, status: &BranchStatus, remote: Option<&str>) -> GitResu
     let branch =
         status.head.as_deref().ok_or_else(|| GitError::new("Switch to a branch before publishing"))?;
     let remote = remote.ok_or_else(|| GitError::new("This repository has no remote to push to"))?;
-    run(path, &["push", "--set-upstream", remote, branch])?;
+    run(path, &["push", "--progress", "--set-upstream", remote, branch])?;
     Ok(())
+}
+
+/// Fetches a pull request's branch and returns the branch to switch to: the branch itself for a
+/// pull request from this repository, or `pr/<number>` for one from a fork.
+pub fn fetch_pull(path: &Path, remote: &str, pull: &PullRequest, local: &[String]) -> GitResult<Branch> {
+    let branch =
+        |name: String, is_remote: bool| Branch { name, is_remote, is_current: false, upstream: None };
+    if pull.same_repository {
+        run(path, &["fetch", "--progress", remote, &pull.head_branch])?;
+        return Ok(if local.contains(&pull.head_branch) {
+            branch(pull.head_branch.clone(), false)
+        } else {
+            branch(format!("{remote}/{}", pull.head_branch), true)
+        });
+    }
+    let local_name = format!("pr/{}", pull.number);
+    let refspec = format!("+refs/pull/{}/head:refs/heads/{local_name}", pull.number);
+    run(path, &["fetch", "--progress", remote, &refspec])?;
+    Ok(branch(local_name, false))
 }
 
 /// Connects the repository to a remote (`origin` when it has none yet).

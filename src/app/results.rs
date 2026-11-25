@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use super::DesktopApp;
+use crate::constants::text;
 use crate::services::askpass::GitHubAccount;
 use crate::services::tasks::{OperationKind, TaskOutput};
 use crate::stores::Loadable;
@@ -12,7 +13,7 @@ impl DesktopApp {
     pub(super) fn apply_task(&mut self, output: TaskOutput) {
         match output {
             TaskOutput::RepositoryOpened { result, remember_folder } => {
-                self.busy = None;
+                self.finish_operation();
                 match result {
                     Ok(path) => {
                         self.dialog = None;
@@ -23,6 +24,7 @@ impl DesktopApp {
                         self.save_settings();
                         self.open_repository(path);
                     }
+                    Err(error) if error.cancelled => {}
                     Err(error) => self.error = Some(error.message),
                 }
             }
@@ -39,15 +41,27 @@ impl DesktopApp {
             },
             TaskOutput::SignedIn(result) => {
                 self.signing_in = false;
+                self.browser_sign_in = None;
+                if matches!(self.dialog, Some(Dialog::BrowserSignIn { .. })) {
+                    self.dialog = None;
+                }
                 match result {
                     Ok(account) => {
                         self.settings.github_login = Some(account.login.clone());
                         self.set_account(Some(account));
                         self.save_settings();
                     }
+                    Err(error) if error == text::SIGN_IN_CANCELLED => {}
                     Err(error) => self.error = Some(error),
                 }
             }
+            TaskOutput::DeviceCode(result) => match result {
+                Ok(code) => self.wait_for_browser_sign_in(code),
+                Err(error) => {
+                    self.signing_in = false;
+                    self.error = Some(error);
+                }
+            },
             TaskOutput::SignedOut(result) => {
                 if let Err(error) = result {
                     self.error = Some(format!("Signed out, but the token couldn't be removed: {error}"));
@@ -56,7 +70,7 @@ impl DesktopApp {
             TaskOutput::Operation { repo, kind, result } => {
                 // Cleared first, so a result for a repository that was closed meanwhile can't leave
                 // the app stuck as busy.
-                self.busy = None;
+                self.finish_operation();
                 let is_current = self.repo_path().as_ref() == Some(&repo);
                 match result {
                     Ok(()) if is_current => {
@@ -64,15 +78,30 @@ impl DesktopApp {
                             && let Some(store) = self.repo.as_mut()
                         {
                             store.clear_commit_message();
+                            store.line_selections.clear();
                         }
                         self.load_snapshot();
                         self.load_history();
                     }
                     Ok(()) => {}
+                    Err(error) if error.cancelled => self.load_snapshot(),
                     Err(error) => {
                         self.error = Some(error.message);
                         self.load_snapshot();
                     }
+                }
+            }
+            pull @ (TaskOutput::Pulls { .. }
+            | TaskOutput::PullDetail { .. }
+            | TaskOutput::CommentPosted { .. }
+            | TaskOutput::PullCreated { .. }
+            | TaskOutput::PullFetched { .. }) => self.apply_pull_output(pull),
+            TaskOutput::Organizations(result) => {
+                if let Some(Dialog::Publish(form)) = self.dialog.as_mut() {
+                    form.organizations = match result {
+                        Ok(organizations) => Loadable::Ready(organizations),
+                        Err(error) => Loadable::Failed(error),
+                    };
                 }
             }
             TaskOutput::MergePreview { repo, branch, result } => {
@@ -110,7 +139,15 @@ impl DesktopApp {
             },
             TaskOutput::WorkingDiff { repo: path, file, result } if is_current(&path) => {
                 if repo.selected_file.as_deref() == Some(file.as_str()) {
+                    if let Ok(diff) = &result {
+                        repo.forget_stale_lines(&file, diff);
+                    }
                     repo.working_diff = Loadable::from_result(result);
+                }
+            }
+            TaskOutput::Conflict { repo: path, file, result } if is_current(&path) => {
+                if repo.selected_file.as_deref() == Some(file.as_str()) {
+                    repo.conflict = Loadable::from_result(result);
                 }
             }
             TaskOutput::History { repo: path, result } if is_current(&path) => {

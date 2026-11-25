@@ -124,7 +124,10 @@ pub const SWITCHING_BRANCH: &str = "Switching branch";
 pub const CREATING_BRANCH: &str = "Creating branch";
 pub const DELETING_BRANCH: &str = "Deleting branch";
 pub const MERGING: &str = "Merging";
+pub const CANCEL_OPERATION: &str = "Cancel";
+pub const CANCELLED: &str = "Cancelled.";
 pub const ABORTING_MERGE: &str = "Aborting merge";
+pub const RESOLVING: &str = "Resolving conflict";
 pub const STASHING: &str = "Stashing";
 pub const RESTORING_STASH: &str = "Restoring stash";
 pub const DROPPING_STASH: &str = "Discarding stash";
@@ -179,6 +182,9 @@ pub fn busy(operation: &str) -> String {
 pub const OPEN_IN_EDITOR_FALLBACK: &str = "Open in editor";
 pub const OPEN_WITH_DEFAULT_APP: &str = "Open with default program";
 pub const COPY_PATH: &str = "Copy full path";
+pub const COPY_LINES: &str = "Copy";
+pub const COPY_LINES_WITH_MARKERS: &str = "Copy as diff (with + and -)";
+pub const SELECT_ALL_LINES: &str = "Select all";
 pub const COPY_RELATIVE_PATH: &str = "Copy relative path";
 pub const COPY_SHA: &str = "Copy commit SHA";
 pub const OPEN_ON_GITHUB: &str = "Open repository on GitHub";
@@ -205,6 +211,16 @@ pub const CREATE_TOKEN: &str = "Create a token on GitHub";
 pub const SIGN_IN: &str = "Sign in";
 pub const SIGN_OUT: &str = "Sign out";
 pub const SIGNING_IN: &str = "Signing in";
+pub const SIGN_IN_WITH_BROWSER: &str = "Sign in with your browser";
+pub const OR_USE_TOKEN: &str = "Or use a personal access token:";
+pub const BROWSER_SIGN_IN_TITLE: &str = "Sign in to GitHub";
+pub const BROWSER_SIGN_IN_STEPS: &str =
+    "Enter this code on GitHub and approve the app. You'll be signed in here as soon as you do.";
+pub const COPY_CODE_AND_OPEN: &str = "Copy code and open GitHub";
+pub const WAITING_FOR_GITHUB: &str = "Waiting for you to approve on GitHub…";
+pub const SIGN_IN_CANCELLED: &str = "Sign-in cancelled.";
+pub const SIGN_IN_EXPIRED: &str = "The sign-in code expired. Start again from Preferences.";
+pub const SIGN_IN_DENIED: &str = "Sign-in was declined on GitHub.";
 pub const UPDATES: &str = "Updates";
 pub const AUTO_UPDATE: &str = "Check for updates automatically";
 pub const CHECK_NOW: &str = "Check now";
@@ -226,6 +242,8 @@ pub const OK: &str = "OK";
 pub const PUBLISH_TITLE: &str = "Publish repository";
 pub const PUBLISH_TO_GITHUB: &str = "Publish to GitHub";
 pub const PUBLISH_DESCRIPTION: &str = "Description";
+pub const PUBLISH_OWNER: &str = "Owner";
+pub const LOADING_ORGANIZATIONS: &str = "Loading your organizations…";
 pub const PUBLISH_PRIVATE: &str = "Keep this code private";
 pub const PUBLISH_SIGN_IN_FIRST: &str = "Sign in to GitHub under Menu → Preferences to publish there.";
 pub const PUBLISH_EXISTING_REMOTE: &str = "Or connect an existing remote";
@@ -373,4 +391,119 @@ pub fn git_out_of_memory(command: &str) -> String {
         "`{command}` was stopped by the system because it used too much memory. This usually means git \
          was handling very large files, such as a build folder missing from .gitignore."
     )
+}
+
+pub fn lines_changed(path: &str) -> String {
+    format!("{path} changed after you picked its lines. Check the lines again, then commit.")
+}
+
+// Conflicts
+pub const CONFLICT_HINT: &str = "Pick a side for each conflict, or edit the file in your editor.";
+pub const NO_CONFLICTS_LEFT: &str = "No conflicts left in this file. Mark it as resolved to commit it.";
+pub const MARK_RESOLVED: &str = "Mark as resolved";
+pub const USE_OURS: &str = "Use mine";
+pub const USE_THEIRS: &str = "Use theirs";
+pub const USE_BOTH: &str = "Use both";
+pub const CONFLICT_BASE: &str = "Original";
+
+pub fn conflicts_left(count: usize) -> String {
+    if count == 1 { "1 conflict to resolve".to_owned() } else { format!("{count} conflicts to resolve") }
+}
+
+pub fn conflict_number(number: usize, count: usize) -> String {
+    format!("Conflict {number} of {count}")
+}
+
+pub fn use_whole_file(side: &str) -> String {
+    format!("Use the whole file from {side}")
+}
+
+pub fn yours(label: &str) -> String {
+    format!("Yours ({label})")
+}
+
+pub fn theirs(label: &str) -> String {
+    format!("Theirs ({label})")
+}
+
+pub fn organizations_failed(error: &str) -> String {
+    format!("Your organizations couldn't be loaded, so only your account is listed: {error}")
+}
+
+// Pull requests
+pub const TAB_PULLS: &str = "Pull requests";
+pub const TAB_PULLS_SHORT: &str = "PRs";
+pub const NEW_PULL: &str = "New pull request";
+pub const CREATE_PULL_MENU: &str = "Create pull request…";
+pub const CREATE_PULL_TITLE: &str = "Create a pull request";
+pub const CREATE_PULL_BUTTON: &str = "Create pull request";
+pub const PULL_INTO: &str = "Into";
+pub const PULL_TITLE: &str = "Title";
+pub const PULL_DESCRIPTION: &str = "Description";
+pub const PULL_DRAFT: &str = "Create as a draft";
+pub const PULL_SAME_BRANCH: &str = "Choose a different branch to merge into.";
+pub const PULLS_SIGN_IN_TITLE: &str = "Sign in to see pull requests";
+pub const PULLS_SIGN_IN_BODY: &str = "Pull requests come from GitHub. Sign in under Menu → Preferences.";
+pub const PULLS_NOT_GITHUB_TITLE: &str = "Not a GitHub repository";
+pub const PULLS_NOT_GITHUB_BODY: &str =
+    "Pull requests are shown for repositories whose remote is on github.com.";
+pub const NO_PULLS_TITLE: &str = "No open pull requests";
+pub const NO_PULLS_BODY: &str = "Push a branch and create one with New pull request.";
+pub const SELECT_PULL: &str = "Select a pull request";
+pub const CHECKOUT_PULL: &str = "Check out branch";
+pub const OPEN_PULL_ON_GITHUB: &str = "Open on GitHub";
+pub const DRAFT: &str = "Draft";
+pub const NO_DESCRIPTION: &str = "No description.";
+pub const CONVERSATION: &str = "Conversation";
+pub const NO_COMMENTS: &str = "No comments yet.";
+pub const COMMENT_HINT: &str = "Leave a comment";
+pub const COMMENT_BUTTON: &str = "Comment";
+pub const PUBLISH_BRANCH_FIRST: &str = "Publish this branch first, then create a pull request for it.";
+
+pub fn pull_from(branch: &str) -> String {
+    format!("From {branch}")
+}
+
+pub fn pull_meta(number: u64, author: &str, head: &str, base: &str) -> String {
+    format!("#{number} by {author} · {head} → {base}")
+}
+
+pub fn opened_on(author: &str, date: &str) -> String {
+    format!("{author} opened this on {date}")
+}
+
+pub fn checks_summary(passed: usize, failed: usize, pending: usize) -> Option<String> {
+    let mut parts = Vec::new();
+    if failed > 0 {
+        parts.push(format!("{failed} failed"));
+    }
+    if pending > 0 {
+        parts.push(format!("{pending} running"));
+    }
+    if passed > 0 {
+        parts.push(format!("{passed} passed"));
+    }
+    (!parts.is_empty()).then(|| format!("Checks: {}", parts.join(", ")))
+}
+
+// Co-authors
+pub const ADD_CO_AUTHORS: &str = "Add co-authors";
+pub const REMOVE_CO_AUTHORS: &str = "Remove co-authors";
+pub const CO_AUTHOR_HINT: &str = "Name <email>, or type to find someone who committed here";
+
+// Image previews
+pub const IMAGE_BEFORE: &str = "Before";
+pub const IMAGE_AFTER: &str = "After";
+pub const IMAGE_ADDED: &str = "New image";
+pub const IMAGE_DELETED: &str = "Deleted image";
+pub const IMAGE_TOO_LARGE: &str = "Too large to preview";
+pub const IMAGE_UNREADABLE: &str = "Can't be previewed (unsupported or damaged)";
+
+pub fn image_details(width: u32, height: u32, bytes: usize) -> String {
+    let size = if bytes >= 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    };
+    format!("{width} × {height} · {size}")
 }

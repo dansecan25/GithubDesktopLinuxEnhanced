@@ -3,7 +3,7 @@ use std::io::Read;
 use std::path::Path;
 
 use super::parse;
-use super::runner::{GitError, GitResult, run, run_capped, run_with_input};
+use super::runner::{GitError, GitResult, run, run_binary, run_capped, run_with_input};
 use crate::constants::git::{EMPTY_TREE_HASH, MAX_DIFF_BYTES, MAX_UNTRACKED_BYTES, MAX_UNTRACKED_FILES};
 use crate::constants::text;
 use crate::models::{ChangeKind, Diff, FileChange};
@@ -58,20 +58,31 @@ pub fn commit(repo: &Path, message: &str, chosen: &[FileChange], all_chosen: boo
     }
 
     let paths = paths_with_originals(chosen);
-    // Paths already gone from both index and disk (a staged deletion) would make `git add` fail.
-    let addable: Vec<&str> = chosen
-        .iter()
-        .filter(|change| repo.join(&change.path).exists() || is_in_index(repo, &change.path))
-        .map(|change| change.path.as_str())
-        .collect();
-    if !addable.is_empty() {
-        let mut args = vec!["add", "--all", "--"];
-        args.extend(&addable);
-        run(repo, &args)?;
-    }
+    stage(repo, chosen)?;
     let mut args = vec!["commit", "--file", "-", "--only", "--"];
     args.extend(paths.iter().map(String::as_str));
     run_with_input(repo, &args, Some(message))?;
+    Ok(())
+}
+
+/// A file's content in a commit (`rev` like `HEAD` or a SHA), as stored: no text conversion.
+pub fn file_at(repo: &Path, rev: &str, path: &str, max_bytes: usize) -> GitResult<Vec<u8>> {
+    run_binary(repo, &["cat-file", "blob", &format!("{rev}:{path}")], max_bytes)
+}
+
+/// Adds `changes` to the index: new and modified files, deletions, and both sides of renames.
+pub fn stage(repo: &Path, changes: &[FileChange]) -> GitResult<()> {
+    // Paths already gone from both index and disk (a staged deletion) would make `git add` fail.
+    let addable: Vec<String> = paths_with_originals(changes)
+        .into_iter()
+        .filter(|path| repo.join(path).exists() || is_in_index(repo, path))
+        .collect();
+    if addable.is_empty() {
+        return Ok(());
+    }
+    let mut args = vec!["add", "--all", "--"];
+    args.extend(addable.iter().map(String::as_str));
+    run(repo, &args)?;
     Ok(())
 }
 

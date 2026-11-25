@@ -35,7 +35,7 @@ pub fn clone(url: &str, parent: &Path) -> GitResult<PathBuf> {
     std::fs::create_dir_all(parent)
         .map_err(|error| GitError::new(format!("Could not create {}: {error}", parent.display())))?;
     let destination_text = destination.to_string_lossy();
-    run(parent, &["clone", "--", &url, &destination_text])?;
+    run(parent, &["clone", "--progress", "--", &url, &destination_text])?;
     Ok(destination)
 }
 

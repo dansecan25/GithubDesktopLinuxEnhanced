@@ -7,7 +7,7 @@ use crate::constants::text;
 use crate::services::settings::ThemeChoice;
 use crate::services::update::Status;
 use crate::ui::actions::Action;
-use crate::ui::components::{field_label, muted_text, primary_button, secondary_button};
+use crate::ui::components::{field_label, muted_text, primary_button, rounded, secondary_button};
 
 pub fn show(
     ui: &mut Ui,
@@ -48,6 +48,16 @@ pub fn show(
             });
         }
         None => {
+            ui.horizontal(|ui| {
+                if primary_button(ui, text::SIGN_IN_WITH_BROWSER, !context.signing_in).clicked() {
+                    actions.push(Action::StartBrowserSignIn);
+                }
+                if context.signing_in {
+                    ui.spinner();
+                }
+            });
+            ui.add_space(4.0);
+            ui.label(text::OR_USE_TOKEN);
             ui.add(egui::Label::new(muted_text(ui, text::TOKEN_HELP)).wrap());
             ui.hyperlink_to(text::CREATE_TOKEN, TOKEN_SETTINGS_URL);
             ui.add(
@@ -72,7 +82,7 @@ pub fn show(
 
     field_label(ui, text::UPDATES);
     let mut automatic = settings.auto_update;
-    if ui.checkbox(&mut automatic, text::AUTO_UPDATE).changed() {
+    if rounded(ui, |ui| ui.checkbox(&mut automatic, text::AUTO_UPDATE)).changed() {
         actions.push(Action::SetAutoUpdate(automatic));
     }
     ui.horizontal(|ui| {

@@ -1,13 +1,16 @@
 use eframe::egui::{self, PopupCloseBehavior, RichText, Ui};
 
 use super::{ViewContext, context_menus};
-use crate::constants::layout::{MIN_TARGET_SIZE, SIDEBAR_DEFAULT_WIDTH};
+use crate::constants::layout::{MIN_TARGET_SIZE, SIDEBAR_DEFAULT_WIDTH, TOOLBAR_MARGIN};
 use crate::constants::text;
 use crate::models::{Branch, RepoSnapshot};
 use crate::services::settings::ThemeChoice;
 use crate::stores::RepoStore;
 use crate::ui::actions::Action;
-use crate::ui::components::{dropdown_menu, left_clicked, right_click_menu, toolbar_button};
+use crate::ui::components::{
+    dropdown_menu, left_clicked, operation_status, right_click_menu, toolbar_button, toolbar_reach,
+    with_hover_shading,
+};
 use crate::ui::dialogs::{Dialog, MergeForm};
 use crate::ui::theme::{self, TOOLBAR_TEXT};
 use crate::utils::paths::display_name;
@@ -15,7 +18,7 @@ use crate::utils::paths::display_name;
 pub fn toolbar(ui: &mut Ui, view: &ViewContext<'_>, repo: Option<&RepoStore>, actions: &mut Vec<Action>) {
     let background = theme::palette(ui.visuals()).toolbar_background;
     egui::Panel::top("toolbar")
-        .frame(egui::Frame::new().fill(background).inner_margin(egui::Margin::symmetric(8, 4)))
+        .frame(egui::Frame::new().fill(background).inner_margin(egui::Margin::from(TOOLBAR_MARGIN)))
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 repository_menu(ui, view, repo, actions);
@@ -25,10 +28,11 @@ pub fn toolbar(ui: &mut Ui, view: &ViewContext<'_>, repo: Option<&RepoStore>, ac
                     ui.separator();
                     branch_menu(ui, view, repo, snapshot, actions);
                     ui.separator();
-                    sync_button(ui, repo, snapshot, view.busy, actions);
+                    sync_button(ui, repo, snapshot, view, actions);
                 }
                 ui.separator();
-                if repo.is_some() && icon_button(ui, "↻", text::REFRESH).clicked() {
+                // Refresh follows a separator; the menu ends the row.
+                if repo.is_some() && icon_button(ui, "↻", text::REFRESH, true).clicked() {
                     actions.push(Action::Refresh);
                 }
                 app_menu(ui, view, actions);
@@ -36,11 +40,12 @@ pub fn toolbar(ui: &mut Ui, view: &ViewContext<'_>, repo: Option<&RepoStore>, ac
         });
 }
 
-fn icon_button(ui: &mut Ui, icon: &str, label: &str) -> egui::Response {
+fn icon_button(ui: &mut Ui, icon: &str, label: &str, after_separator: bool) -> egui::Response {
     let button = egui::Button::new(RichText::new(icon).size(18.0).color(TOOLBAR_TEXT))
         .frame(false)
         .min_size(egui::vec2(MIN_TARGET_SIZE, MIN_TARGET_SIZE));
-    let response = ui.add(button).on_hover_text(label);
+    let reach = toolbar_reach(ui, after_separator, false);
+    let response = with_hover_shading(ui, reach, |ui| ui.add(button)).on_hover_text(label);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     response
 }
@@ -116,6 +121,13 @@ fn branch_menu(
                 && let Some(commit) = head_commit
             {
                 actions.push(context_menus::tag_dialog(snapshot, commit));
+                ui.close();
+            }
+            let can_open_pull = view.settings.github_login.is_some()
+                && snapshot.status.upstream.is_some()
+                && context_menus::github_url(snapshot).is_some();
+            if ui.add_enabled(can_open_pull, egui::Button::new(text::CREATE_PULL_MENU)).clicked() {
+                actions.push(Action::OpenCreatePull);
                 ui.close();
             }
             let filter_id = ui.scope_id().with("branch-filter");
@@ -194,13 +206,14 @@ fn sync_button(
     ui: &mut Ui,
     repo: &RepoStore,
     snapshot: &RepoSnapshot,
-    busy: Option<&str>,
+    view: &ViewContext<'_>,
     actions: &mut Vec<Action>,
 ) {
     let status = &snapshot.status;
-    if let Some(operation) = busy {
-        ui.spinner();
-        ui.label(RichText::new(text::busy(operation)).color(TOOLBAR_TEXT));
+    if let Some(operation) = view.busy {
+        if operation_status(ui, operation, view.progress.as_ref(), view.can_cancel, Some(TOOLBAR_TEXT)) {
+            actions.push(Action::CancelOperation);
+        }
         return;
     }
     if snapshot.remote.is_none() {
@@ -228,7 +241,7 @@ fn sync_button(
 
 /// Preferences, theme and updates.
 fn app_menu(ui: &mut Ui, view: &ViewContext<'_>, actions: &mut Vec<Action>) {
-    let response = icon_button(ui, "⋯", text::APP_MENU);
+    let response = icon_button(ui, "⋯", text::APP_MENU, false);
     dropdown_menu(&response).show(|ui| {
         if ui.button(text::PREFERENCES).clicked() {
             actions.push(Action::OpenDialog(Dialog::preferences(view.settings, view.editors)));

@@ -52,26 +52,50 @@ in `Cargo.toml`. Nothing machine-specific belongs in this repository. Use a giti
   one popup open at a time, so its menus closed the dropdown they were opened from, and some
   touchpads send a left click with the right click. Use `right_click_menu`, `left_clicked` and
   `dropdown_menu` for any new menu or clickable row.
-- Diff text can't be selected or copied yet.
-- Commits always include whole files. Line-by-line selection isn't implemented.
-- Merges stopped on conflicts can be finished (commit) or aborted, but there's no built-in conflict
-  editor: files are resolved in the user's editor. Committing is refused while a conflicted file
-  still has conflict markers (`git/merge.rs`). Squash and rebase merges aren't offered.
-- Git operations can't be cancelled, and clone shows a spinner but no progress percentage.
+- Conflicts are resolved block by block in `ui/views/conflict.rs` (`git/conflicts.rs` parses the
+  markers, keeping line endings). Committing is still refused while a conflicted file has conflict
+  markers (`git/merge.rs`). Squash and rebase merges aren't offered.
+- Line-by-line commits (`git/partial.rs`) reset the index and rebuild it: whole files are added and
+  partly chosen files get a patch applied with `git apply --cached --recount`. Anything staged
+  outside the app is unstaged, as GitHub Desktop does. Lines can't be picked in renames, deletions,
+  conflicts, binary or cut diffs, or during a merge. Files with CRLF line endings may fail to apply
+  (diff lines are stored without `\r`); the error is shown and nothing is committed.
+- Diff text is selected by whole lines, not characters: the diff only lays out visible rows.
+- Image previews (`services/image_preview.rs`) decode in background tasks with the `image` crate
+  (already in the tree through egui's clipboard, so only the WebP, GIF, BMP and ICO decoders were
+  added). Files over 50 MB or 60 megapixels aren't decoded, and the rest are shrunk to 2048 px on
+  the longer side, so a huge image can't freeze the window or use up memory. SVG, video and audio
+  aren't previewed: SVG would need a renderer (resvg), and video a media stack. GIF shows its first
+  frame. A renamed image is compared with its old path in Changes, but not in History.
+- `show_rows` works out visible rows from the item spacing set before it is called, so a list whose
+  rows touch (the diff) must set the spacing outside the closure. Setting it inside left the bottom
+  of long diffs empty (fixed 2026-11-24).
+- File rows are 28 px tall and their checkboxes only as big as the box, so the name sits next to it
+  as in GitHub Desktop. Both are below the 40 px touch-target rule, at the owner's request
+  (2026-11-24). egui sizes checkboxes, buttons and `horizontal` rows from `interact_size.y`, so
+  `file_row` lowers it before laying out the row.
+- Every widget has square corners (set in `theme::apply`) except checkboxes, which are drawn through
+  `components::rounded`. Use it for any new checkbox.
+- Cancelling sends git SIGTERM (so clone removes its half-made folder), then SIGKILL after 5 s. Only
+  fetch, pull, push, publish, tag pushes and clone can be cancelled.
+- The OAuth app (Client ID in `constants/github.rs`) has only Device Flow enabled: no client secret,
+  no expiring tokens, no wildcard redirects. Its name on GitHub is "Git Desktop Linux Enhanced".
+- Pull requests show the conversation (issue comments) and a checks summary. Review comments on
+  lines, reviews, merging a pull request and editing one are done on GitHub (**Open on GitHub**).
 - A repository whose folder was moved or deleted stays in the list and shows git's error until it is
   removed from the list.
 - Stashes tied to a branch use GitHub Desktop's message format (`!!GitHub_Desktop<branch>`), so
   stashes from either app show on the right branch. A branch shows its own stashes plus untagged
   ones. Unlike GitHub Desktop, a branch can hold more than one stash.
-- Publishing to GitHub creates the repository on the signed-in account only, not in an organization.
 - Tags pushed to the remote aren't tracked: the app doesn't show which tags exist only locally.
-- Signing in needs a personal access token. GitHub's browser (OAuth device) sign-in isn't
-  implemented.
 - A credential prompt that nobody answers keeps that git command waiting until it's answered or
   the app closes.
 
 ## Not yet verified
 
+- Against real GitHub (only mocked JSON and local bare remotes in tests): browser sign-in after
+  approval (the device code request itself was checked against GitHub), listing organizations and
+  publishing into one, listing pull requests with checks, commenting, creating a pull request.
 - Network remotes on GitHub: sign-in with a real token, publishing a repository through the API, and
   pushing or pulling over HTTPS with the token. Tests cover the same git commands against local bare
   remotes, and real git getting credentials through the askpass bridge, but not GitHub itself.

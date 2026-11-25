@@ -2,21 +2,26 @@
 //!
 //! - `mod.rs`: state, startup and the per-frame loop
 //! - `handlers.rs`: what each [`Action`] does
+//! - `pulls.rs`: pull requests on GitHub
 //! - `results.rs`: applying finished background tasks
 //! - `window.rs`: window size tracking and keyboard shortcuts
 
 mod handlers;
+mod pulls;
 mod results;
 mod window;
 
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 
 pub use window::initial_window;
 
+use crate::constants::layout::PROGRESS_REPAINT_INTERVAL;
 use crate::constants::text;
+use crate::git::control::OperationControl;
 use crate::services::askpass::{AskpassRequest, AskpassServer, GitHubAccount, SharedAccount};
 use crate::services::editor::{self, Editor};
 use crate::services::secrets;
@@ -45,12 +50,17 @@ pub struct DesktopApp {
     error: Option<String>,
     /// Label of the running git operation. Only one runs at a time.
     busy: Option<&'static str>,
+    /// Progress and cancellation for the running operation.
+    control: Option<Arc<OperationControl>>,
+    cancellable: bool,
 
     /// Installed code editors, found once at startup.
     editors: Vec<Editor>,
     /// The signed-in GitHub account, shared with the askpass server.
     account: SharedAccount,
     signing_in: bool,
+    /// Set to stop waiting for a browser sign-in.
+    browser_sign_in: Option<Arc<AtomicBool>>,
     askpass: Option<AskpassServer>,
     /// The credential prompt on screen, and what the user has typed so far.
     prompt: Option<(AskpassRequest, String)>,
@@ -85,9 +95,12 @@ impl DesktopApp {
             dialog_opening: 0,
             error: askpass_error.or_else(watchdog::take_last_exit_notice),
             busy: None,
+            control: None,
+            cancellable: false,
             editors: editor::detect(),
             account,
             signing_in: false,
+            browser_sign_in: None,
             askpass,
             prompt: None,
             updater: Updater::default(),
@@ -173,10 +186,17 @@ impl eframe::App for DesktopApp {
         self.shortcuts(&ctx, &mut actions);
 
         let open_in_label = self.open_in_label();
+        let progress = self.control.as_ref().and_then(|control| control.progress());
+        if self.control.is_some() {
+            // Keeps the progress bar moving: git's progress doesn't wake the UI by itself.
+            ctx.request_repaint_after(PROGRESS_REPAINT_INTERVAL);
+        }
         let view = ViewContext {
             settings: &self.settings,
             editors: &self.editors,
             busy: self.busy,
+            progress: progress.clone(),
+            can_cancel: self.cancellable,
             open_in_label: &open_in_label,
         };
         views::toolbar(ui, &view, self.repo.as_ref(), &mut actions);
@@ -192,6 +212,8 @@ impl eframe::App for DesktopApp {
             settings: &self.settings,
             editors: &self.editors,
             busy: self.busy,
+            progress: progress.clone(),
+            can_cancel: self.cancellable,
             open_in_label: &open_in_label,
         };
         match self.repo.as_mut() {
@@ -209,6 +231,10 @@ impl eframe::App for DesktopApp {
                 can_update: update::can_update(),
                 signing_in: self.signing_in,
                 busy: self.busy.is_some(),
+                operation: self.busy,
+                progress,
+                can_cancel: self.cancellable,
+                sending: self.repo.as_ref().is_some_and(|repo| repo.pull_sending),
                 opening: self.dialog_opening,
             };
             dialogs::show(&ctx, dialog, &context, &mut actions);

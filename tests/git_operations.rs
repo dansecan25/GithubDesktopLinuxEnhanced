@@ -4,8 +4,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use github_desktop_enhanced::git::{branches, changes, history, merge, remote, repository, stash, tags};
-use github_desktop_enhanced::models::{ChangeKind, FileChange};
+use github_desktop_enhanced::git::{
+    branches, changes, conflicts, history, merge, partial, remote, repository, stash, tags,
+};
+use github_desktop_enhanced::models::{ChangeKind, ConflictChoice, FileChange, LineSelection};
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -404,4 +406,264 @@ fn huge_untracked_build_output_is_not_stashed_or_committed() {
     assert!(error.message.contains("target/"), "{}", error.message);
     assert!(repo.0.join("target/app.bin").exists());
     assert!(stash::list(&repo.0).unwrap().is_empty());
+}
+
+#[test]
+fn clone_reports_progress() {
+    use github_desktop_enhanced::git::control::{OperationControl, with_control};
+    let source = TempRepo::new();
+    source.write("a.txt", &"some content\n".repeat(1000));
+    git(&source.0, &["add", "."]);
+    git(&source.0, &["commit", "-m", "first"]);
+    let parent = TempRepo::new();
+    let control = std::sync::Arc::new(OperationControl::default());
+    // file:// makes git transfer a pack, as over the network, instead of copying files.
+    let url = format!("file://{}", source.0.display());
+    let cloned = with_control(control.clone(), || repository::clone(&url, &parent.0)).unwrap();
+    assert!(cloned.join("a.txt").exists());
+    assert!(control.progress().is_some(), "git reported no progress");
+}
+
+#[test]
+fn cancelling_stops_a_running_push() {
+    use github_desktop_enhanced::git::control::{OperationControl, with_control};
+    let remote = bare_remote();
+    let repo = TempRepo::new();
+    repo.write("a.txt", "a\n");
+    git(&repo.0, &["add", "."]);
+    git(&repo.0, &["commit", "-m", "first"]);
+    git(&repo.0, &["remote", "add", "origin", &remote.0.to_string_lossy()]);
+    // A hook that would keep the push waiting for a minute.
+    let hook = repo.0.join(".git/hooks/pre-push");
+    std::fs::write(&hook, "#!/bin/sh\nsleep 60\n").unwrap();
+    Command::new("chmod").arg("+x").arg(&hook).status().unwrap();
+
+    let control = std::sync::Arc::new(OperationControl::default());
+    let canceller = control.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        canceller.cancel();
+    });
+    let started = std::time::Instant::now();
+    let status = repository::load_snapshot(&repo.0).unwrap().status;
+    let error = with_control(control, || remote::push(&repo.0, &status, Some("origin"))).unwrap_err();
+    assert!(error.cancelled, "{}", error.message);
+    assert!(started.elapsed() < std::time::Duration::from_secs(10));
+}
+
+fn head_content(repo: &TempRepo, file: &str) -> String {
+    let output =
+        Command::new("git").current_dir(&repo.0).args(["show", &format!("HEAD:{file}")]).output().unwrap();
+    String::from_utf8(output.stdout).unwrap()
+}
+
+/// Picks lines of `file`'s working diff: `leave_out` lists the texts (with +/-) to leave out.
+fn pick(repo: &TempRepo, file: &str, leave_out: &[&str]) -> (FileChange, LineSelection) {
+    let change = find(&repo.changes(), file).clone();
+    let diff = changes::working_diff(&repo.0, &change, true).unwrap();
+    let mut selection = LineSelection::new(diff);
+    let indexes: Vec<usize> = leave_out
+        .iter()
+        .map(|text| selection.diff.lines.iter().position(|line| line.text == *text).expect(text))
+        .collect();
+    for index in indexes {
+        selection.toggle_line(index);
+    }
+    (change, selection)
+}
+
+#[test]
+fn commits_only_the_chosen_lines() {
+    let repo = TempRepo::new();
+    let original: String = (1..=20).map(|n| format!("line {n}\n")).collect();
+    repo.write("f.txt", &original);
+    repo.write("other.txt", "other\n");
+    git(&repo.0, &["add", "."]);
+    git(&repo.0, &["commit", "-m", "first"]);
+    // Two separate hunks, and a second file committed whole.
+    let edited = original.replace("line 2\n", "line two\n").replace("line 19\n", "line nineteen\n");
+    repo.write("f.txt", &edited);
+    repo.write("other.txt", "other changed\n");
+
+    let partial_file = pick(&repo, "f.txt", &["-line 19", "+line nineteen"]);
+    let chosen = repo.changes();
+    partial::commit_with_lines(&repo.0, "first hunk only", &chosen, &[partial_file], true).unwrap();
+
+    assert_eq!(head_content(&repo, "f.txt"), original.replace("line 2\n", "line two\n"));
+    assert_eq!(head_content(&repo, "other.txt"), "other changed\n");
+    // What was left out is still there, uncommitted.
+    assert_eq!(std::fs::read_to_string(repo.0.join("f.txt")).unwrap(), edited);
+    let left = repo.changes();
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].path, "f.txt");
+}
+
+#[test]
+fn leaving_out_a_removal_keeps_the_old_line() {
+    let repo = TempRepo::new();
+    repo.write("f.txt", "keep\nold\n");
+    git(&repo.0, &["add", "."]);
+    git(&repo.0, &["commit", "-m", "first"]);
+    repo.write("f.txt", "keep\nnew\n");
+    let partial_file = pick(&repo, "f.txt", &["-old"]);
+    partial::commit_with_lines(&repo.0, "add new", &repo.changes(), &[partial_file], true).unwrap();
+    assert_eq!(head_content(&repo, "f.txt"), "keep\nold\nnew\n");
+}
+
+#[test]
+fn new_files_can_be_committed_in_part() {
+    let repo = TempRepo::new();
+    repo.write("README.md", "hi\n");
+    git(&repo.0, &["add", "."]);
+    git(&repo.0, &["commit", "-m", "first"]);
+    repo.write("new.txt", "a\nb\nc");
+    let partial_file = pick(&repo, "new.txt", &["+b"]);
+    partial::commit_with_lines(&repo.0, "part of new", &repo.changes(), &[partial_file], true).unwrap();
+    assert_eq!(head_content(&repo, "new.txt"), "a\nc");
+}
+
+#[test]
+fn a_file_changed_after_picking_lines_is_not_committed() {
+    let repo = TempRepo::new();
+    repo.write("f.txt", "a\nb\n");
+    git(&repo.0, &["add", "."]);
+    git(&repo.0, &["commit", "-m", "first"]);
+    repo.write("f.txt", "A\nB\n");
+    let partial_file = pick(&repo, "f.txt", &["-b", "+B"]);
+    repo.write("f.txt", "A\nB\nC\n");
+    let error =
+        partial::commit_with_lines(&repo.0, "stale", &repo.changes(), &[partial_file], true).unwrap_err();
+    assert!(error.message.contains("changed after you picked"), "{}", error.message);
+    assert_eq!(head_content(&repo, "f.txt"), "a\nb\n");
+}
+
+/// A merge of `feature` into main stopped on a conflict in shared.txt.
+fn stopped_merge() -> TempRepo {
+    let repo = repo_with_feature_branch();
+    repo.write("shared.txt", "one from main\n");
+    git(&repo.0, &["commit", "-am", "main change"]);
+    let _ = merge::merge(&repo.0, "feature");
+    assert_eq!(find(&repo.changes(), "shared.txt").kind, ChangeKind::Conflicted);
+    repo
+}
+
+#[test]
+fn conflicts_resolved_block_by_block_finish_the_merge() {
+    let repo = stopped_merge();
+    let file = conflicts::read(&repo.0, "shared.txt").unwrap();
+    assert_eq!(file.conflict_count(), 1);
+    assert!(conflicts::mark_resolved(&repo.0, "shared.txt").is_err(), "markers are still there");
+
+    conflicts::choose(&repo.0, "shared.txt", 0, ConflictChoice::Both).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(repo.0.join("shared.txt")).unwrap(),
+        "one from main\none from feature\n"
+    );
+    conflicts::mark_resolved(&repo.0, "shared.txt").unwrap();
+    let changes = repo.changes();
+    assert_ne!(find(&changes, "shared.txt").kind, ChangeKind::Conflicted);
+    changes::commit(&repo.0, "Merge branch 'feature'", &changes, true).unwrap();
+    assert!(merge::message(&repo.0).is_none());
+}
+
+#[test]
+fn a_whole_side_can_be_taken() {
+    let repo = stopped_merge();
+    conflicts::take_side(&repo.0, "shared.txt", false).unwrap();
+    assert_eq!(std::fs::read_to_string(repo.0.join("shared.txt")).unwrap(), "one from feature\n");
+    assert_ne!(find(&repo.changes(), "shared.txt").kind, ChangeKind::Conflicted);
+}
+
+#[test]
+fn taking_the_side_that_deleted_the_file_deletes_it() {
+    let repo = repo_with_feature_branch();
+    git(&repo.0, &["switch", "feature"]);
+    git(&repo.0, &["rm", "-q", "shared.txt"]);
+    git(&repo.0, &["commit", "-m", "delete on feature"]);
+    git(&repo.0, &["switch", "main"]);
+    repo.write("shared.txt", "changed on main\n");
+    git(&repo.0, &["commit", "-am", "main change"]);
+    let _ = merge::merge(&repo.0, "feature");
+
+    conflicts::take_side(&repo.0, "shared.txt", false).unwrap();
+    assert!(!repo.0.join("shared.txt").exists());
+    assert!(repo.changes().iter().all(|change| change.kind != ChangeKind::Conflicted));
+}
+
+fn pull(number: u64, head: &str, same_repository: bool) -> github_desktop_enhanced::models::PullRequest {
+    github_desktop_enhanced::models::PullRequest {
+        number,
+        title: "A change".into(),
+        body: String::new(),
+        author: "sam".into(),
+        head_branch: head.into(),
+        base_branch: "main".into(),
+        head_sha: String::new(),
+        same_repository,
+        draft: false,
+        url: String::new(),
+        created_at: String::new(),
+    }
+}
+
+#[test]
+fn pull_request_branches_can_be_checked_out() {
+    let remote_repo = bare_remote();
+    let repo = TempRepo::new();
+    repo.write("a.txt", "a\n");
+    git(&repo.0, &["add", "."]);
+    git(&repo.0, &["commit", "-m", "first"]);
+    git(&repo.0, &["remote", "add", "origin", &remote_repo.0.to_string_lossy()]);
+    git(&repo.0, &["push", "-q", "origin", "main"]);
+    // A branch on the remote, and a fork's pull request, which GitHub keeps under refs/pull/.
+    git(&repo.0, &["switch", "-q", "-c", "feature"]);
+    repo.write("a.txt", "feature\n");
+    git(&repo.0, &["commit", "-qam", "feature"]);
+    git(&repo.0, &["push", "-q", "origin", "feature", "feature:refs/pull/9/head"]);
+    git(&repo.0, &["switch", "-q", "main"]);
+    git(&repo.0, &["branch", "-q", "-D", "feature"]);
+
+    let branch = remote::fetch_pull(&repo.0, "origin", &pull(3, "feature", true), &["main".into()]).unwrap();
+    assert_eq!((branch.name.as_str(), branch.is_remote), ("origin/feature", true));
+    branches::switch(&repo.0, &branch).unwrap();
+    assert_eq!(std::fs::read_to_string(repo.0.join("a.txt")).unwrap(), "feature\n");
+
+    git(&repo.0, &["switch", "-q", "main"]);
+    let fork = remote::fetch_pull(&repo.0, "origin", &pull(9, "their-branch", false), &[]).unwrap();
+    assert_eq!((fork.name.as_str(), fork.is_remote), ("pr/9", false));
+    branches::switch(&repo.0, &fork).unwrap();
+    assert_eq!(std::fs::read_to_string(repo.0.join("a.txt")).unwrap(), "feature\n");
+}
+
+fn png(color: [u8; 4], width: u32) -> Vec<u8> {
+    let image = image::RgbaImage::from_pixel(width, 10, image::Rgba(color));
+    let mut bytes = Vec::new();
+    image::DynamicImage::ImageRgba8(image)
+        .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+        .unwrap();
+    bytes
+}
+
+#[test]
+fn image_changes_have_before_and_after_previews() {
+    use github_desktop_enhanced::models::ImageSide;
+    use github_desktop_enhanced::services::image_preview;
+    let repo = TempRepo::new();
+    std::fs::write(repo.0.join("logo.png"), png([255, 0, 0, 255], 20)).unwrap();
+    git(&repo.0, &["add", "."]);
+    git(&repo.0, &["commit", "-m", "logo"]);
+    std::fs::write(repo.0.join("logo.png"), png([0, 0, 255, 255], 40)).unwrap();
+
+    let change = find(&repo.changes(), "logo.png").clone();
+    let pair = image_preview::working(&repo.0, &change, true);
+    let (ImageSide::Image(before), ImageSide::Image(after)) = (&pair.before, &pair.after) else {
+        panic!("both sides should be pictures: {pair:?}");
+    };
+    assert_eq!((before.width, after.width), (20, 40));
+
+    // In the first commit there is nothing before.
+    let sha = git(&repo.0, &["rev-parse", "HEAD"]);
+    let first = image_preview::in_commit(&repo.0, sha.trim(), "logo.png");
+    assert_eq!(first.before, ImageSide::Missing);
+    assert!(matches!(first.after, ImageSide::Image(_)));
 }

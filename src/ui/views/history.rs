@@ -6,7 +6,7 @@ use crate::models::{CommitSummary, RepoSnapshot};
 use crate::stores::{Loadable, RepoStore};
 use crate::ui::actions::Action;
 use crate::ui::components::{
-    diff_view, dropdown_menu, empty_state, file_row, left_clicked, loadable_status, muted_text,
+    diff_view, dropdown_menu, empty_state, file_row, left_clicked, list_divider, loadable_status, muted_text,
     right_click_menu,
 };
 use crate::ui::theme;
@@ -32,6 +32,7 @@ pub fn history_list(ui: &mut Ui, repo: &RepoStore, view: &ViewContext<'_>, actio
                 let selected = repo.selected_commit.as_deref() == Some(commit.sha.as_str());
                 let tags = tags_on(snapshot, &commit.sha);
                 let row = commit_row(ui, commit, &tags, selected, row_height);
+                list_divider(ui, row.rect);
                 if left_clicked(&row) {
                     actions.push(Action::SelectCommit(commit.sha.clone()));
                 }
@@ -116,7 +117,7 @@ pub fn history_detail(
             egui::ScrollArea::vertical().id_salt("commit-files").auto_shrink([false, true]).show(ui, |ui| {
                 for file in files {
                     let selected = repo.selected_commit_file.as_deref() == Some(file.path.as_str());
-                    let row = file_row(ui, file, selected, None);
+                    let row = file_row(ui, file, selected, None, false);
                     if left_clicked(&row) {
                         actions.push(Action::SelectCommitFile(file.path.clone()));
                     }
@@ -129,6 +130,11 @@ pub fn history_detail(
         other => loadable_status(ui, other),
     };
     let diff = if repo.selected_commit_file.is_some() { &repo.commit_diff } else { &Loadable::Idle };
+    let commit_diff_id = format!(
+        "commit-diff-{}-{}",
+        repo.selected_commit.as_deref().unwrap_or_default(),
+        repo.selected_commit_file.as_deref().unwrap_or_default()
+    );
 
     if narrow {
         egui::Panel::top("commit-files-panel")
@@ -146,5 +152,5 @@ pub fn history_detail(
             .show(ui, |ui| files(ui, actions));
     }
     egui::CentralPanel::no_frame()
-        .show(ui, |ui| diff_view(ui, diff, text::SELECT_COMMIT_FILE, "commit-diff"));
+        .show(ui, |ui| diff_view(ui, diff, text::SELECT_COMMIT_FILE, &commit_diff_id, None));
 }

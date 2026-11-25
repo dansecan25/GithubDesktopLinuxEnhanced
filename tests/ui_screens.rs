@@ -27,20 +27,38 @@ fn git(dir: &Path, args: &[&str]) {
     assert!(status.success(), "git {args:?}");
 }
 
+/// A 96×64 picture: a coloured circle on transparency, so the checkerboard shows.
+fn logo(color: [u8; 4]) -> Vec<u8> {
+    let image = image::RgbaImage::from_fn(96, 64, |x, y| {
+        let (dx, dy) = (x as f32 - 48.0, y as f32 - 32.0);
+        if dx * dx + dy * dy < 28.0 * 28.0 { image::Rgba(color) } else { image::Rgba([0, 0, 0, 0]) }
+    });
+    let mut bytes = Vec::new();
+    image::DynamicImage::ImageRgba8(image)
+        .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+        .unwrap();
+    bytes
+}
+
 fn demo_repository(root: &Path) -> PathBuf {
     let repo = root.join("demo-project");
     std::fs::create_dir_all(&repo).unwrap();
     git(&repo, &["init", "-q", "-b", "main"]);
     std::fs::write(repo.join("main.rs"), "fn main() {\n    println!(\"hello\");\n}\n").unwrap();
+    std::fs::write(repo.join("logo.png"), logo([0x1f, 0x6f, 0xeb, 0xff])).unwrap();
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "First commit", "-m", "Sets up the project."]);
     git(&repo, &["tag", "-a", "v0.1.0", "-m", "First release"]);
     std::fs::write(repo.join("main.rs"), "fn main() {\n    println!(\"hello, world\");\n}\n").unwrap();
     std::fs::write(repo.join("notes.txt"), "remember to write docs\n").unwrap();
+    std::fs::write(repo.join("logo.png"), logo([0x2d, 0xa4, 0x4e, 0x80])).unwrap();
     // A long path must be cut with "…", not widen the sidebar.
     let deep = repo.join("portfolio/public/images/projects/github-desktop-enhanced");
     std::fs::create_dir_all(&deep).unwrap();
     std::fs::write(deep.join("branch-menu.png"), "not really an image\n").unwrap();
+    // Long enough to scroll: the whole height of the diff must stay filled.
+    let long: String = (1..=300).map(|n| format!("line {n}\n")).collect();
+    std::fs::write(repo.join("long.txt"), long).unwrap();
     repo
 }
 
@@ -75,6 +93,76 @@ fn save(harness: &mut Harness<'_, DesktopApp>, name: &str) {
         std::fs::create_dir_all(&dir).unwrap();
         image.save(Path::new(&dir).join(format!("{name}.png"))).unwrap();
     }
+}
+
+/// Drags over the removed and added line of main.rs's diff, then copies them with Ctrl+C.
+fn select_and_copy_diff_lines(harness: &mut Harness<'_, DesktopApp>) {
+    let (from, to) = (egui::pos2(600.0, 201.0), egui::pos2(600.0, 218.0));
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    harness.event(egui::Event::PointerMoved(from));
+    harness.event(button(from, true));
+    harness.step();
+    harness.event(egui::Event::PointerMoved(to));
+    harness.step();
+    harness.event(button(to, false));
+    harness.step();
+    harness.event(egui::Event::Copy);
+    harness.step();
+    let copied: Vec<&String> = harness
+        .output()
+        .platform_output
+        .commands
+        .iter()
+        .filter_map(|command| match command {
+            egui::OutputCommand::CopyText(text) => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(copied, ["    println!(\"hello\");\n    println!(\"hello, world\");"]);
+    save(harness, "diff-selection");
+
+    // Clicking the removed line's gutter leaves it out of the commit.
+    let gutter = egui::pos2(330.0, 201.0);
+    harness.event(egui::Event::PointerMoved(gutter));
+    harness.event(button(gutter, true));
+    harness.step();
+    harness.event(button(gutter, false));
+    harness.step();
+    harness.step();
+    save(harness, "lines-picked");
+}
+
+/// Scrolls to the end of a long diff, then opens the co-authors field.
+fn long_diff_and_co_authors(harness: &mut Harness<'_, DesktopApp>) {
+    click_row(harness, "long.txt");
+    settle(harness);
+    harness.event(egui::Event::PointerMoved(egui::pos2(700.0, 400.0)));
+    for _ in 0..40 {
+        harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, -10.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
+        });
+        harness.step();
+    }
+    settle(harness);
+    save(harness, "long-diff-end");
+    harness.get_by_label("Add co-authors").click();
+    settle(harness);
+    save(harness, "co-authors");
+    harness.event(egui::Event::PointerMoved(egui::pos2(60.0, 24.0)));
+    harness.step();
+    harness.step();
+    save(harness, "toolbar-hover");
+    click_row(harness, "main.rs");
+    settle(harness);
 }
 
 /// Right-click menus and the new dialogs, in the wide layout.
@@ -238,6 +326,22 @@ fn renders_main_screens() {
         click_row(&harness, "main.rs");
         settle(&mut harness);
         save(&mut harness, &format!("changes-{suffix}"));
+        if theme == ThemeChoice::Dark {
+            click_row(&harness, "logo.png");
+            settle(&mut harness);
+            save(&mut harness, "image-diff");
+            click_row(&harness, "branch-menu.png");
+            settle(&mut harness);
+            save(&mut harness, "image-unreadable");
+            click_row(&harness, "main.rs");
+            settle(&mut harness);
+        }
+        if theme == ThemeChoice::Dark {
+            select_and_copy_diff_lines(&mut harness);
+        }
+        if theme == ThemeChoice::Dark {
+            long_diff_and_co_authors(&mut harness);
+        }
 
         harness.get_by_label("History").click();
         settle(&mut harness);
@@ -246,6 +350,10 @@ fn renders_main_screens() {
         click_row(&harness, "main.rs");
         settle(&mut harness);
         save(&mut harness, &format!("history-{suffix}"));
+
+        harness.get_by_label("PRs").click();
+        settle(&mut harness);
+        save(&mut harness, &format!("pulls-{suffix}"));
 
         harness.get_by_label_contains("Changes").click();
         settle(&mut harness);
@@ -261,5 +369,41 @@ fn renders_main_screens() {
             dialogs_and_menus(&mut harness, &repo);
         }
     }
+    conflict_editor(&root);
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A merge stopped on a conflict, shown in the conflict editor.
+fn conflict_editor(root: &Path) {
+    let repo = root.join("conflict-project");
+    std::fs::create_dir_all(&repo).unwrap();
+    git(&repo, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo.join("config.toml"), "[server]\nport = 8080\nhost = \"localhost\"\n").unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "Add config"]);
+    git(&repo, &["switch", "-q", "-c", "feature"]);
+    std::fs::write(repo.join("config.toml"), "[server]\nport = 9090\nhost = \"localhost\"\n").unwrap();
+    git(&repo, &["commit", "-q", "-am", "Use port 9090"]);
+    git(&repo, &["switch", "-q", "main"]);
+    std::fs::write(repo.join("config.toml"), "[server]\nport = 3000\nhost = \"localhost\"\n").unwrap();
+    git(&repo, &["commit", "-q", "-am", "Use port 3000"]);
+    let _ = Command::new("git").current_dir(&repo).args(["merge", "feature"]).output();
+
+    let settings = Settings {
+        repositories: vec![repo.clone()],
+        selected_repository: Some(repo.clone()),
+        theme: ThemeChoice::Dark,
+        ..Settings::default()
+    };
+    let mut harness = Harness::builder().with_size(WIDE).build_eframe(|cc| DesktopApp::new(cc, settings));
+    settle(&mut harness);
+    click_row(&harness, "config.toml");
+    settle(&mut harness);
+    assert!(harness.query_by_label("Use theirs").is_some(), "conflict editor");
+    save(&mut harness, "conflict-editor");
+    harness.get_by_label("Use both").click();
+    settle(&mut harness);
+    settle(&mut harness);
+    assert!(harness.query_by_label("Mark as resolved").is_some(), "resolved file");
+    save(&mut harness, "conflict-resolved");
 }

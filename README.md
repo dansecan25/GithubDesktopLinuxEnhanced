@@ -35,6 +35,17 @@ Available now:
   Clone and create remember the last folder you used.
 - **Changes**: see every changed file with a coloured diff, choose which files go into the commit
   with checkboxes, and commit with a summary and description.
+- **Image previews**: a changed PNG, JPEG, WebP, GIF, BMP or ICO file shows the picture before and
+  after the change (side by side, or one above the other in a narrow window), with its size, on a
+  checkerboard so transparency shows. Works in Changes and in History.
+- **Co-authors**: **Add co-authors** under the description credits other people on the commit, as
+  GitHub Desktop does (`Co-authored-by:` lines). Type `Name <email>` or pick someone who has
+  committed to the repository.
+- **Commit single lines**: click a line's number in the diff to leave it out of the commit, or an
+  `@@` line's number for the whole block. The file's checkbox shows a dash when only part of it is
+  chosen; the lines left out stay as uncommitted changes.
+- **Copy from diffs**: drag over lines (or Shift-click) to select them, then Ctrl+C or right-click
+  → **Copy**. The code is copied without the `+` and `-` markers; **Copy as diff** keeps them.
 - **Right-click menus like GitHub Desktop's**: open a repository or file in your code editor, show it
   in the file manager, open a file with its default program, copy paths, discard changes, or add a
   new file to `.gitignore`. Branches can be opened on GitHub, commits tagged or have their SHA
@@ -51,18 +62,25 @@ Available now:
   show up again under **Stashed changes** when you come back) or **bring them to the new branch**.
 - **Merging**: at the bottom of the branch menu, **Choose a branch to merge into &lt;current&gt;**
   shows how many commits will come in and which files would conflict before anything changes, then
-  **Create a merge commit**. If there are conflicts, resolve them in your editor and commit to
-  finish the merge, or click **Abort merge**.
+  **Create a merge commit**. If there are conflicts, click each conflicted file (`!`) to resolve it
+  in the app: **Use mine**, **Use theirs** or **Use both** for each conflict, or take the whole file
+  from one side, then **Mark as resolved** and commit. Or **Abort merge**.
 - **Sync**: one button that publishes, pulls, pushes or fetches depending on the branch, with an
-  ahead/behind count. A new branch is published to the remote with one click.
-- **Publish repository**: put a local repository on GitHub (public or private) in one step, or
-  connect any existing remote URL and push.
+  ahead/behind count. A new branch is published to the remote with one click. Fetch, pull, push and
+  clone show git's progress and can be cancelled.
+- **Publish repository**: put a local repository on GitHub (public or private), on your account or
+  in one of your organizations, in one step. Or connect any existing remote URL and push.
+- **Pull requests**: the **Pull requests** tab (**PRs** when the sidebar is narrow) lists the open
+  pull requests with their checks, description and conversation. Comment, open one on GitHub, or
+  **Check out branch** (pull requests from forks too). **Create pull request…** in the branch menu
+  opens one from the current branch, as a draft if you like.
 - **Tags for releases**: create a tag on the current commit (branch menu) or any commit (right-click
   in History). The dialog suggests the next patch, minor and major version after your highest
   `vX.Y.Z` tag, can make an annotated tag with release notes, and pushes it so a release workflow
   can start. Tags can be pushed or deleted later from the commit view.
-- **Sign in to GitHub** with a personal access token, kept in the system keychain. Pushing, pulling
-  and publishing then never ask for credentials. Without signing in, git's prompts (HTTPS username
+- **Sign in to GitHub** with your browser (enter a short code on github.com) or a personal access
+  token. The token is kept in the system keychain. Pushing, pulling and publishing then never ask
+  for credentials. Without signing in, git's prompts (HTTPS username
   and password, SSH key passphrase, unknown host key) appear as dialogs in the app.
 - **Updates**: the app checks GitHub releases on start and every 12 hours, downloads the new version
   in the background and offers **Install**, then **Restart now** or **Later**.
@@ -73,9 +91,7 @@ Available now:
 
 Planned:
 
-- **Pull requests**: list the open PRs on the repository, create a PR from the current branch, and
-  read and write comments.
-- Conflict resolution helpers, partial (line-by-line) commits, and amend/undo last commit.
+- Amend and undo the last commit.
 
 ## Install
 
@@ -110,12 +126,15 @@ Start it from your app menu or run `github-desktop-enhanced`.
 
 ### Signing in to GitHub
 
-GitHub doesn't accept account passwords for git, so the app signs in with a personal access token:
+GitHub doesn't accept account passwords for git. Sign in with your browser instead:
 
-1. Open **Menu (⋯) → Preferences**, and follow **Create a token on GitHub**.
-2. Create a classic token with the **repo** scope (or a fine-grained token with *Contents* and
-   *Administration* read and write access, for the repositories you want to use).
-3. Paste it into **Personal access token** and click **Sign in**.
+1. Open **Menu (⋯) → Preferences** and click **Sign in with your browser**.
+2. Click **Copy code and open GitHub**, paste the code on the page that opens, and approve the app.
+3. The app signs you in by itself as soon as you approve.
+
+Or use a personal access token: follow **Create a token on GitHub**, create a classic token with the
+**repo**, **read:org** and **workflow** scopes, paste it into **Personal access token** and click
+**Sign in**.
 
 The token is stored in your system keychain (GNOME Keyring or KWallet), never in the settings file.
 Signing out removes it. Your own git setup keeps working too: a

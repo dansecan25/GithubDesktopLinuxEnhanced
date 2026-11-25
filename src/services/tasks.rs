@@ -8,7 +8,10 @@ use eframe::egui;
 
 use crate::constants::text;
 use crate::git::GitResult;
-use crate::models::{CommitSummary, Diff, FileChange, MergePreview, RepoSnapshot};
+use crate::github::device::DeviceCode;
+use crate::models::{
+    Branch, CommitSummary, ConflictFile, Diff, FileChange, MergePreview, PullDetail, PullList, RepoSnapshot,
+};
 use crate::services::askpass::GitHubAccount;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,6 +25,7 @@ pub enum OperationKind {
     DeleteBranch,
     Merge,
     AbortMerge,
+    Resolve,
     Stash,
     RestoreStash,
     DropStash,
@@ -34,6 +38,11 @@ pub enum OperationKind {
 }
 
 impl OperationKind {
+    /// Network operations, which can take long and are safe to stop part way.
+    pub fn can_cancel(self) -> bool {
+        matches!(self, Self::Fetch | Self::Pull | Self::Push | Self::Publish | Self::PushTag)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Commit => text::COMMITTING,
@@ -45,6 +54,7 @@ impl OperationKind {
             Self::DeleteBranch => text::DELETING_BRANCH,
             Self::Merge => text::MERGING,
             Self::AbortMerge => text::ABORTING_MERGE,
+            Self::Resolve => text::RESOLVING,
             Self::Stash => text::STASHING,
             Self::RestoreStash => text::RESTORING_STASH,
             Self::DropStash => text::DROPPING_STASH,
@@ -94,6 +104,35 @@ pub enum TaskOutput {
         result: GitResult<PathBuf>,
         remember_folder: Option<PathBuf>,
     },
+    Conflict {
+        repo: PathBuf,
+        file: String,
+        result: GitResult<ConflictFile>,
+    },
+    Organizations(Result<Vec<String>, String>),
+    Pulls {
+        repo: PathBuf,
+        result: Result<PullList, String>,
+    },
+    PullDetail {
+        repo: PathBuf,
+        number: u64,
+        result: Result<PullDetail, String>,
+    },
+    CommentPosted {
+        repo: PathBuf,
+        number: u64,
+        result: Result<(), String>,
+    },
+    PullCreated {
+        repo: PathBuf,
+        result: Result<u64, String>,
+    },
+    /// A pull request's branch was fetched; the app switches to it next.
+    PullFetched {
+        repo: PathBuf,
+        result: GitResult<Branch>,
+    },
     MergePreview {
         repo: PathBuf,
         branch: String,
@@ -102,6 +141,8 @@ pub enum TaskOutput {
     /// The saved GitHub account, read from the keychain at startup.
     AccountLoaded(Result<Option<GitHubAccount>, String>),
     SignedIn(Result<GitHubAccount, String>),
+    /// The code for browser sign-in, before the user enters it.
+    DeviceCode(Result<DeviceCode, String>),
     SignedOut(Result<(), String>),
 }
 
@@ -117,6 +158,14 @@ impl TaskOutput {
             Self::Operation { .. } => "finishing a git operation",
             Self::RepositoryOpened { .. } => "opening a repository",
             Self::MergePreview { .. } => "showing a merge preview",
+            Self::Conflict { .. } => "showing a conflict",
+            Self::Organizations(_) => "listing organizations",
+            Self::Pulls { .. } => "listing pull requests",
+            Self::PullDetail { .. } => "showing a pull request",
+            Self::CommentPosted { .. } => "posting a comment",
+            Self::PullCreated { .. } => "creating a pull request",
+            Self::PullFetched { .. } => "checking out a pull request",
+            Self::DeviceCode(_) => "starting browser sign-in",
             Self::AccountLoaded(_) | Self::SignedIn(_) | Self::SignedOut(_) => "updating the GitHub account",
         }
     }

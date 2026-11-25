@@ -1,6 +1,8 @@
 mod changes;
+mod conflict;
 mod context_menus;
 mod history;
+mod pulls;
 mod toolbar;
 mod update_banner;
 mod welcome;
@@ -13,9 +15,11 @@ pub use welcome::welcome;
 use eframe::egui::{self, Ui};
 
 use crate::constants::layout::{
-    NARROW_LAYOUT_WIDTH, PANEL_PADDING, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH,
+    NARROW_LAYOUT_WIDTH, PANEL_PADDING, PULLS_TAB_FULL_LABEL_WIDTH, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH,
+    SIDEBAR_MIN_WIDTH,
 };
 use crate::constants::text;
+use crate::git::control::GitProgress;
 use crate::services::editor::Editor;
 use crate::services::settings::Settings;
 use crate::stores::RepoStore;
@@ -28,6 +32,10 @@ pub struct ViewContext<'a> {
     pub editors: &'a [Editor],
     /// Label of the running git operation, if any.
     pub busy: Option<&'a str>,
+    /// What git last reported about the running operation.
+    pub progress: Option<GitProgress>,
+    /// Whether the running operation can be cancelled.
+    pub can_cancel: bool,
     /// "Open in Visual Studio Code", or a generic label when no editor is known.
     pub open_in_label: &'a str,
 }
@@ -72,15 +80,26 @@ pub fn repository_screen(
 
 fn sidebar(ui: &mut Ui, repo: &mut RepoStore, tab: Tab, view: &ViewContext<'_>, actions: &mut Vec<Action>) {
     ui.horizontal(|ui| {
-        let width = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
-        for (value, label) in [(Tab::Changes, text::TAB_CHANGES), (Tab::History, text::TAB_HISTORY)] {
-            let label = if value == Tab::Changes {
-                format!("{label} ({})", repo.changes().len())
-            } else {
-                label.to_owned()
+        let tabs = [
+            (Tab::Changes, text::TAB_CHANGES),
+            (Tab::History, text::TAB_HISTORY),
+            (Tab::PullRequests, text::TAB_PULLS),
+        ];
+        let gaps = ui.spacing().item_spacing.x * (tabs.len() - 1) as f32;
+        let width = (ui.available_width() - gaps) / tabs.len() as f32;
+        for (value, label) in tabs {
+            let short = value == Tab::PullRequests && width < PULLS_TAB_FULL_LABEL_WIDTH;
+            let shown = match value {
+                Tab::Changes => format!("{label} ({})", repo.changes().len()),
+                // "Pull requests" doesn't fit a third of the default sidebar.
+                Tab::PullRequests if short => text::TAB_PULLS_SHORT.to_owned(),
+                _ => label.to_owned(),
             };
-            let button = egui::Button::selectable(tab == value, label).min_size(egui::vec2(width, 0.0));
-            if ui.add(button).clicked() {
+            let button =
+                egui::Button::selectable(tab == value, shown).truncate().min_size(egui::vec2(width, 0.0));
+            let response = ui.add(button);
+            let response = if short { response.on_hover_text(label) } else { response };
+            if response.clicked() {
                 actions.push(Action::SetTab(value));
             }
         }
@@ -89,19 +108,21 @@ fn sidebar(ui: &mut Ui, repo: &mut RepoStore, tab: Tab, view: &ViewContext<'_>, 
     match tab {
         Tab::Changes => changes::changes_list(ui, repo, view, actions),
         Tab::History => history::history_list(ui, repo, view, actions),
+        Tab::PullRequests => pulls::pulls_list(ui, repo, view, actions),
     }
 }
 
 fn detail(
     ui: &mut Ui,
-    repo: &RepoStore,
+    repo: &mut RepoStore,
     tab: Tab,
     view: &ViewContext<'_>,
     narrow: bool,
     actions: &mut Vec<Action>,
 ) {
     match tab {
-        Tab::Changes => changes::changes_detail(ui, repo),
+        Tab::Changes => changes::changes_detail(ui, repo, view, actions),
         Tab::History => history::history_detail(ui, repo, view, narrow, actions),
+        Tab::PullRequests => pulls::pull_detail(ui, repo, view, actions),
     }
 }

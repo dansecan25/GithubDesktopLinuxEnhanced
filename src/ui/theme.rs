@@ -61,6 +61,13 @@ pub fn palette(visuals: &Visuals) -> Palette {
 
 /// Text color on the always-dark toolbar, in both themes.
 pub const TOOLBAR_TEXT: Color32 = Color32::from_rgb(0xf0, 0xf6, 0xfc);
+/// Shading behind a toolbar button under the pointer (the toolbar is dark in both themes).
+pub const TOOLBAR_HOVER: Color32 = Color32::from_rgba_premultiplied(28, 28, 28, 28);
+
+/// The line between list rows and diff lines.
+pub fn row_divider(visuals: &egui::Visuals, opacity: f32) -> egui::Stroke {
+    egui::Stroke::new(1.0, visuals.widgets.noninteractive.bg_stroke.color.gamma_multiply(opacity))
+}
 
 /// Name of egui's bundled monospace font, which also covers the arrows and symbols the UI uses.
 const SYMBOL_FALLBACK_FONT: &str = "Hack";
@@ -88,6 +95,17 @@ pub fn apply(ctx: &egui::Context, theme: ThemeChoice) {
         style.spacing.interact_size.y = MIN_TARGET_SIZE;
         style.spacing.button_padding = egui::vec2(12.0, 6.0);
         style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+        // Square corners on every widget; checkboxes get theirs back in `components::rounded`.
+        let widgets = &mut style.visuals.widgets;
+        for state in [
+            &mut widgets.noninteractive,
+            &mut widgets.inactive,
+            &mut widgets.hovered,
+            &mut widgets.active,
+            &mut widgets.open,
+        ] {
+            state.corner_radius = egui::CornerRadius::ZERO;
+        }
     });
 }
 

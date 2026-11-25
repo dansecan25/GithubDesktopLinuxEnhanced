@@ -1,5 +1,8 @@
 //! GitHub's REST API. One shared HTTP agent, and one function per call the app makes.
 
+pub mod device;
+pub mod pulls;
+
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -119,17 +122,36 @@ pub struct CreatedRepository {
     pub html_url: String,
 }
 
-/// Creates a repository on the signed-in account.
+#[derive(Deserialize)]
+struct Organization {
+    login: String,
+}
+
+/// The organizations the signed-in account belongs to (needs the `read:org` scope for private
+/// memberships).
+pub fn organizations(token: &str) -> Result<Vec<String>, String> {
+    let agent = agent(API_TIMEOUT);
+    let organizations: Vec<Organization> =
+        read(authorized(agent.get(format!("{API_BASE}/user/orgs?per_page=100")), token).call())?;
+    Ok(organizations.into_iter().map(|organization| organization.login).collect())
+}
+
+/// Creates a repository on the signed-in account, or in `organization`.
 pub fn create_repository(
     token: &str,
+    organization: Option<&str>,
     name: &str,
     description: &str,
     private: bool,
 ) -> Result<CreatedRepository, String> {
     let agent = agent(API_TIMEOUT);
     let body = serde_json::json!({ "name": name, "description": description, "private": private });
+    let url = match organization {
+        Some(organization) => format!("{API_BASE}/orgs/{organization}/repos"),
+        None => format!("{API_BASE}/user/repos"),
+    };
     let request = agent
-        .post(format!("{API_BASE}/user/repos"))
+        .post(url)
         .header("Authorization", format!("Bearer {token}"))
         .header("Accept", "application/vnd.github+json")
         .header("Content-Type", "application/json");

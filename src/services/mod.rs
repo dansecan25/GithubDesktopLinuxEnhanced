@@ -1,5 +1,6 @@
 pub mod askpass;
 pub mod editor;
+pub mod image_preview;
 pub mod memory_cap;
 pub mod secrets;
 pub mod settings;

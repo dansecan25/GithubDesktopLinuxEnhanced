@@ -23,11 +23,13 @@ src/
   app/               Controller
     mod.rs           State, startup and the per-frame loop
     handlers.rs      What each Action does (starts background tasks)
+    pulls.rs         Pull requests: load, select, comment, create, check out
     results.rs       Applies finished tasks to the state
     window.rs        Window size tracking, refresh on focus, keyboard shortcuts
   constants/         Fixed values: app ids, layout, git limits, GitHub/update values, known editors,
                      every UI string (text.rs)
-  models/            Plain data: FileChange, Branch, CommitSummary, StashEntry, Tag, Diff, RepoSnapshot
+  models/            Plain data: FileChange, Branch, CommitSummary, StashEntry, Tag, Diff and line
+                     selections, conflicts, merge previews, pull requests, RepoSnapshot
   git/               Git operations, one module per area
     runner.rs        The only place that starts `git`; adds the askpass environment, caps output, times out local commands
     parse.rs         Pure parsers for git's machine-readable output, binary detection (unit tested)
@@ -39,7 +41,12 @@ src/
     stash.rs         List, stash all, restore, drop
     tags.rs          List, create (lightweight or annotated), push, delete
     merge.rs         Merge preview (commits, conflicts), merge, abort, unresolved conflict check
-  github/            GitHub REST API: check a token, create a repository, latest release
+    conflicts.rs     Parse conflict markers, resolve a block, take a side, mark resolved
+    partial.rs       Commit chosen lines: rebuild the index with a patch per partly chosen file
+    control.rs       Progress and cancelling for long operations (clone, fetch, pull, push)
+  github/            GitHub REST API: check a token, organizations, create a repository, latest release
+    device.rs        Browser sign-in (OAuth device flow)
+    pulls.rs         Pull requests: list, conversation and checks, comment, create
   services/          Non-UI services
     tasks.rs         Background threads and the result channel
     askpass.rs       Credential bridge between git/ssh and the app (see below)
@@ -49,6 +56,7 @@ src/
     settings.rs      Load and atomically save settings.json
     window_state.rs  Window size validation and recording (the shrinking-window fix)
     system.rs        Open with the desktop's default app; start programs without zombies
+    image_preview.rs Decode the before and after pictures of a changed image, within memory limits
     memory_cap.rs    Relaunch inside a memory-limited systemd scope; start other programs outside it
     watchdog.rs      Freeze and memory reports, and closing the app before it slows the computer
   stores/            UI state for the open repository (RepoStore) and the Loadable wrapper
@@ -56,9 +64,11 @@ src/
     actions.rs       Every user intent as an Action enum
     theme.rs         Design system: colour palette, spacing, fonts
     shortcuts.rs     Keyboard shortcuts
-    components/      Shared widgets: buttons, file row, diff view, dialog frame, folder picker
-    dialogs/         Repository, branch, confirmation, preferences, publish, tag and credential dialogs
-    views/           Toolbar, Changes, History, welcome, right-click menus, update bar, layout
+    components/      Shared widgets: buttons, file row, diff view, image diff, progress, clicks, dialog frame, folder picker
+    dialogs/         Repository, branch, merge, switch, confirmation, preferences, publish, pull
+                     request, tag, browser sign-in and credential dialogs
+    views/           Toolbar, Changes, History, Pull requests, conflict editor, welcome, right-click
+                     menus, update bar, layout
   utils/             Small pure helpers (path display, version numbers)
 tests/
   git_operations.rs  Integration tests against real throwaway repositories and bare remotes
