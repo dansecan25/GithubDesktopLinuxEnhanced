@@ -385,3 +385,23 @@ fn switching_can_bring_changes_unless_they_conflict() {
     assert!(error.message.contains("Leave my changes on main"), "{}", error.message);
     assert_eq!(std::fs::read_to_string(repo.0.join("shared.txt")).unwrap(), "edited on main\n");
 }
+
+#[test]
+fn huge_untracked_build_output_is_not_stashed_or_committed() {
+    let repo = TempRepo::new();
+    repo.write("README.md", "hi\n");
+    git(&repo.0, &["add", "."]);
+    git(&repo.0, &["commit", "-m", "first"]);
+    // Sparse: 1.5 GB on paper, nothing on disk. Git is never asked to read it.
+    std::fs::create_dir_all(repo.0.join("target")).unwrap();
+    let file = std::fs::File::create(repo.0.join("target/app.bin")).unwrap();
+    file.set_len(1536 * 1024 * 1024).unwrap();
+
+    let error = stash::push_all(&repo.0, "wip").unwrap_err();
+    assert!(error.message.contains("target/"), "{}", error.message);
+    let changes = repo.changes();
+    let error = changes::commit(&repo.0, "add build", &changes, true).unwrap_err();
+    assert!(error.message.contains("target/"), "{}", error.message);
+    assert!(repo.0.join("target/app.bin").exists());
+    assert!(stash::list(&repo.0).unwrap().is_empty());
+}

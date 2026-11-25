@@ -179,6 +179,9 @@ The app can't take your whole computer down with it:
   commands were running.
 - Git output is capped (diffs at 2 MB, other commands at 64 MB), and local git commands are stopped
   after 5 minutes. Clone, fetch, pull, push and commit have no time limit.
+- New files adding up to more than 1 GB or 50,000 files aren't stashed or committed. That's almost
+  always a build folder missing from `.gitignore` (for example on a branch made before the
+  `.gitignore` existed), and git would need gigabytes of memory to store it.
 
 Reports are saved in `~/.local/state/github-desktop-enhanced/reports/`. They don't contain tokens,
 file contents or commit messages.

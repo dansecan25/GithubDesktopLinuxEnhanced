@@ -22,6 +22,9 @@ are in [README.md](README.md). Structure and internals are in [DOCUMENTATION.md]
 - Run builds and tests through `./limited.sh`. The owner's laptop froze (2026-11-24) when the
   screenshot tests ran while swap was already full: software rendering plus a parallel build used
   up the memory, and nothing stopped it. Never run the screenshot tests right after a full build.
+- On 2026-11-24 git was stopped twice by the app's 2 GB memory limit: on `main`, which had no
+  `.gitignore` yet, switching branches stashed the 14 GB `target/` folder as untracked files.
+  `changes::check_untracked_size` now refuses that for stashes and commits.
 - Programs the app starts for the user (editors, file manager) go through
   `memory_cap::outside_cap`, so they don't count against the app's memory limit.
 - Check new dependencies with `cargo audit` and keep the count low.

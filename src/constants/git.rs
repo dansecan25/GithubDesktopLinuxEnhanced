@@ -48,3 +48,8 @@ pub const GIT_POLL_MAX: std::time::Duration = std::time::Duration::from_millis(2
 /// same format is used, so stashes made by either app show up on the right branch in both.
 pub const BRANCH_STASH_PREFIX: &str = "!!GitHub_Desktop<";
 pub const BRANCH_STASH_SUFFIX: &str = ">";
+
+/// New (untracked) files above these totals aren't stashed or committed: it's almost always a
+/// build folder missing from `.gitignore`, and git would need gigabytes of memory to store it.
+pub const MAX_UNTRACKED_BYTES: u64 = 1024 * 1024 * 1024;
+pub const MAX_UNTRACKED_FILES: usize = 50_000;

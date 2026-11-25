@@ -1,5 +1,6 @@
 use std::fmt;
 use std::io::{Read, Write};
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -10,6 +11,7 @@ use crate::constants::app::{ASKPASS_SOCKET_ENV, ASKPASS_TOKEN_ENV};
 use crate::constants::git::{
     GIT_BINARY, GIT_POLL_MAX, GIT_TIMEOUT, MAX_GIT_ERROR_BYTES, MAX_GIT_OUTPUT_BYTES, UNTIMED_GIT_COMMANDS,
 };
+use crate::constants::text;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitError {
@@ -54,6 +56,8 @@ pub struct GitOutput {
     /// stdout went over the size limit, so git was stopped and `stdout` holds only the start.
     pub truncated: bool,
 }
+
+const SIGKILL: i32 = 9;
 
 /// Git commands running right now, for the watchdog's freeze reports.
 static RUNNING: Mutex<Vec<(u64, String, Instant)>> = Mutex::new(Vec::new());
@@ -152,6 +156,10 @@ fn run_limited(dir: &Path, args: &[&str], stdin: Option<&str>, max_stdout: usize
             GIT_TIMEOUT.as_secs() / 60
         )));
     };
+    // SIGKILL that wasn't the timeout: the memory limit (see `services/memory_cap.rs`).
+    if status.signal() == Some(SIGKILL) {
+        return Err(GitError::new(text::git_out_of_memory(&describe(args))));
+    }
     let (stdout, truncated) = stdout.join().unwrap_or_default();
     let (stderr, _) = stderr.join().unwrap_or_default();
 

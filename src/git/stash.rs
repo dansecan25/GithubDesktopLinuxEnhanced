@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use super::parse;
 use super::runner::{GitResult, run};
+use super::{changes, parse};
 use crate::constants::git::{BRANCH_STASH_PREFIX, BRANCH_STASH_SUFFIX};
 use crate::models::StashEntry;
 
@@ -31,6 +31,8 @@ pub fn push_all_checked(path: &Path, message: &str) -> GitResult<bool> {
 
 /// Stashes every change, including untracked files, like GitHub Desktop's "Stash all changes".
 pub fn push_all(path: &Path, message: &str) -> GitResult<()> {
+    let untracked = run(path, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+    changes::check_untracked_size(path, untracked.split('\0').filter(|file| !file.is_empty()))?;
     run(path, &["stash", "push", "--include-untracked", "--message", message])?;
     Ok(())
 }

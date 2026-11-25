@@ -349,3 +349,28 @@ pub fn bring_changes_failed(to: &str, from: &str) -> String {
 pub fn changes_left_on(branch: &str) -> String {
     format!("Changes left on {branch}")
 }
+
+fn size(bytes: u64) -> String {
+    const MIB: u64 = 1024 * 1024;
+    if bytes >= 1024 * MIB {
+        format!("{:.1} GB", bytes as f64 / (1024 * MIB) as f64)
+    } else {
+        format!("{} MB", bytes / MIB)
+    }
+}
+
+pub fn too_many_untracked(files: usize, bytes: u64, biggest: &str) -> String {
+    format!(
+        "There are {files} new files ({}), mostly in {biggest}. That looks like build output, which git \
+         would need gigabytes of memory to store. Add {biggest} to .gitignore (right-click one of its \
+         files, then Ignore), then try again.",
+        size(bytes)
+    )
+}
+
+pub fn git_out_of_memory(command: &str) -> String {
+    format!(
+        "`{command}` was stopped by the system because it used too much memory. This usually means git \
+         was handling very large files, such as a build folder missing from .gitignore."
+    )
+}

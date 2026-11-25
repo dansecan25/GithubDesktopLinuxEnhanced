@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
 
 use super::parse;
 use super::runner::{GitError, GitResult, run, run_capped, run_with_input};
-use crate::constants::git::{EMPTY_TREE_HASH, MAX_DIFF_BYTES};
+use crate::constants::git::{EMPTY_TREE_HASH, MAX_DIFF_BYTES, MAX_UNTRACKED_BYTES, MAX_UNTRACKED_FILES};
+use crate::constants::text;
 use crate::models::{ChangeKind, Diff, FileChange};
 
 /// Diff of one working-tree file against the last commit (staged and unstaged together, like
@@ -42,6 +44,13 @@ pub fn commit(repo: &Path, message: &str, chosen: &[FileChange], all_chosen: boo
     if message.trim().is_empty() {
         return Err(GitError::new("Write a commit summary"));
     }
+    check_untracked_size(
+        repo,
+        chosen
+            .iter()
+            .filter(|change| change.kind == ChangeKind::Untracked)
+            .map(|change| change.path.as_str()),
+    )?;
     if all_chosen {
         run(repo, &["add", "--all"])?;
         run_with_input(repo, &["commit", "--file", "-"], Some(message))?;
@@ -110,6 +119,29 @@ fn run_for_paths(repo: &Path, command: &[&str], paths: &[&str]) -> GitResult<()>
     args.extend(paths);
     run(repo, &args)?;
     Ok(())
+}
+
+/// Refuses to stash or commit new files when they add up to more than `MAX_UNTRACKED_BYTES` or
+/// `MAX_UNTRACKED_FILES`, naming the top-level folder that holds most of them.
+pub fn check_untracked_size<'a>(repo: &Path, paths: impl IntoIterator<Item = &'a str>) -> GitResult<()> {
+    let (mut files, mut bytes) = (0, 0);
+    let mut by_folder: HashMap<String, u64> = HashMap::new();
+    for path in paths {
+        let size = std::fs::symlink_metadata(repo.join(path)).map_or(0, |metadata| metadata.len());
+        files += 1;
+        bytes += size;
+        let top = match path.split_once('/') {
+            Some((folder, _)) => format!("{folder}/"),
+            None => path.to_owned(),
+        };
+        *by_folder.entry(top).or_default() += size;
+    }
+    if bytes <= MAX_UNTRACKED_BYTES && files <= MAX_UNTRACKED_FILES {
+        return Ok(());
+    }
+    let biggest =
+        by_folder.into_iter().max_by_key(|(_, size)| *size).map(|(folder, _)| folder).unwrap_or_default();
+    Err(GitError::new(text::too_many_untracked(files, bytes, &biggest)))
 }
 
 /// Adds a line to the repository's top-level `.gitignore`, creating it if needed.
