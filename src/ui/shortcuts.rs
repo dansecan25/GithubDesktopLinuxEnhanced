@@ -15,3 +15,5 @@ pub const NEW_BRANCH: KeyboardShortcut = KeyboardShortcut::new(CTRL_SHIFT, Key::
 pub const NEW_REPOSITORY: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::N);
 pub const ADD_REPOSITORY: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::O);
 pub const CLONE_REPOSITORY: KeyboardShortcut = KeyboardShortcut::new(CTRL_SHIFT, Key::O);
+pub const OPEN_IN_EDITOR: KeyboardShortcut = KeyboardShortcut::new(CTRL_SHIFT, Key::A);
+pub const SHOW_IN_FILE_MANAGER: KeyboardShortcut = KeyboardShortcut::new(CTRL_SHIFT, Key::F);

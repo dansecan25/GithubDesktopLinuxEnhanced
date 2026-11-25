@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use github_desktop_enhanced::git::{branches, changes, history, repository, stash};
+use github_desktop_enhanced::git::{branches, changes, history, remote, repository, stash, tags};
 use github_desktop_enhanced::models::{ChangeKind, FileChange};
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -186,4 +186,87 @@ fn clone_from_local_path_and_rejects_existing_folder() {
     assert_eq!(snapshot.remote.as_deref(), Some("origin"));
     assert_eq!(snapshot.status.upstream.as_deref(), Some("origin/main"));
     assert!(repository::clone(&url, &parent.0).is_err());
+}
+
+/// A bare repository standing in for GitHub.
+fn bare_remote() -> TempRepo {
+    let remote = TempRepo::new();
+    git(&remote.0, &["config", "core.bare", "true"]);
+    let _ = std::fs::remove_dir_all(remote.0.join(".git"));
+    git(&remote.0, &["init", "-q", "--bare", "-b", "main"]);
+    remote
+}
+
+#[test]
+fn publishes_a_branch_that_is_not_on_the_remote_yet() {
+    let origin = bare_remote();
+    let repo = TempRepo::new();
+    repo.write("a.txt", "1\n");
+    changes::commit(&repo.0, "Initial", &repo.changes(), true).unwrap();
+    remote::add(&repo.0, "origin", &origin.0.to_string_lossy()).unwrap();
+    // Like the reported case: a local branch the remote has never seen.
+    branches::create(&repo.0, "develop").unwrap();
+
+    let snapshot = repository::load_snapshot(&repo.0).unwrap();
+    assert_eq!(snapshot.status.upstream, None);
+    remote::push(&repo.0, &snapshot.status, snapshot.remote.as_deref()).unwrap();
+
+    let after = repository::load_snapshot(&repo.0).unwrap();
+    assert_eq!(after.status.upstream.as_deref(), Some("origin/develop"));
+    assert!(git(&origin.0, &["branch", "--list", "develop"]).contains("develop"));
+}
+
+#[test]
+fn publishing_before_the_first_commit_explains_why_not() {
+    let origin = bare_remote();
+    let repo = TempRepo::new();
+    remote::add(&repo.0, "origin", &origin.0.to_string_lossy()).unwrap();
+    let snapshot = repository::load_snapshot(&repo.0).unwrap();
+    let error = remote::push(&repo.0, &snapshot.status, Some("origin")).unwrap_err();
+    assert!(error.message.contains("first commit"), "{error}");
+    assert!(remote::add(&repo.0, "origin", "  ").is_err());
+}
+
+#[test]
+fn tags_create_push_and_delete() {
+    let origin = bare_remote();
+    let repo = TempRepo::new();
+    repo.write("a.txt", "1\n");
+    changes::commit(&repo.0, "Initial", &repo.changes(), true).unwrap();
+    remote::add(&repo.0, "origin", &origin.0.to_string_lossy()).unwrap();
+    let head = history::log(&repo.0).unwrap()[0].sha.clone();
+
+    assert!(!tags::is_valid_name(&repo.0, "bad..tag"));
+    assert!(tags::create(&repo.0, "-x", &head, "").is_err());
+    tags::create(&repo.0, "v0.1.0", &head, "First release\n\nNotes").unwrap();
+    tags::create(&repo.0, "light", &head, "").unwrap();
+
+    let list = tags::list(&repo.0).unwrap();
+    assert_eq!(list.len(), 2);
+    assert!(list.iter().all(|tag| tag.commit == head), "annotated tags must point at the commit: {list:?}");
+    assert_eq!(git(&repo.0, &["cat-file", "-t", "v0.1.0"]).trim(), "tag");
+    assert_eq!(repository::load_snapshot(&repo.0).unwrap().tags.len(), 2);
+
+    tags::push(&repo.0, "origin", "v0.1.0").unwrap();
+    assert!(git(&origin.0, &["tag"]).contains("v0.1.0"));
+    tags::delete(&repo.0, "v0.1.0", Some("origin")).unwrap();
+    assert!(!git(&origin.0, &["tag"]).contains("v0.1.0"));
+    tags::delete(&repo.0, "light", None).unwrap();
+    assert!(tags::list(&repo.0).unwrap().is_empty());
+}
+
+#[test]
+fn ignore_file_adds_an_anchored_escaped_pattern_once() {
+    let repo = TempRepo::new();
+    repo.write("report [draft].pdf", "x");
+    repo.write(".gitignore", "target");
+    let pattern = changes::ignore_pattern("report [draft].pdf");
+    changes::ignore(&repo.0, &pattern).unwrap();
+    changes::ignore(&repo.0, &pattern).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(repo.0.join(".gitignore")).unwrap(),
+        "target\n/report \\[draft\\].pdf\n"
+    );
+    let left = repo.changes();
+    assert!(left.iter().all(|c| c.path != "report [draft].pdf"), "{left:?}");
 }

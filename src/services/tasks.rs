@@ -9,6 +9,7 @@ use eframe::egui;
 use crate::constants::text;
 use crate::git::GitResult;
 use crate::models::{CommitSummary, Diff, FileChange, RepoSnapshot};
+use crate::services::askpass::GitHubAccount;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperationKind {
@@ -23,6 +24,11 @@ pub enum OperationKind {
     RestoreStash,
     DropStash,
     Discard,
+    Ignore,
+    Publish,
+    CreateTag,
+    PushTag,
+    DeleteTag,
 }
 
 impl OperationKind {
@@ -39,6 +45,11 @@ impl OperationKind {
             Self::RestoreStash => text::RESTORING_STASH,
             Self::DropStash => text::DROPPING_STASH,
             Self::Discard => text::DISCARDING,
+            Self::Ignore => text::IGNORING,
+            Self::Publish => text::PUBLISHING,
+            Self::CreateTag => text::CREATING_TAG,
+            Self::PushTag => text::PUSHING_TAG,
+            Self::DeleteTag => text::DELETING_TAG,
         }
     }
 }
@@ -73,10 +84,16 @@ pub enum TaskOutput {
         kind: OperationKind,
         result: GitResult<()>,
     },
-    /// Result of adding, cloning or creating a repository.
+    /// Result of adding, cloning or creating a repository. `remember_folder` becomes the default
+    /// folder for the next clone or new repository.
     RepositoryOpened {
         result: GitResult<PathBuf>,
+        remember_folder: Option<PathBuf>,
     },
+    /// The saved GitHub account, read from the keychain at startup.
+    AccountLoaded(Result<Option<GitHubAccount>, String>),
+    SignedIn(Result<GitHubAccount, String>),
+    SignedOut(Result<(), String>),
 }
 
 pub struct Tasks {

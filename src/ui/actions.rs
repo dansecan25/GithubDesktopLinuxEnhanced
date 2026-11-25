@@ -17,6 +17,9 @@ pub enum Tab {
 pub enum Action {
     OpenDialog(Dialog),
     CloseDialog,
+    /// Answers the pending git or ssh credential prompt. `None` cancels it.
+    AnswerPrompt(Option<String>),
+
     SelectRepository(PathBuf),
     RemoveRepository(PathBuf),
     AddRepository(PathBuf),
@@ -25,8 +28,22 @@ pub enum Action {
         parent: PathBuf,
     },
     CreateRepository(PathBuf),
+
     ShowInFileManager(PathBuf),
+    OpenWithSystem(PathBuf),
+    OpenInEditor(PathBuf),
+    CopyText(String),
+
     SetTheme(ThemeChoice),
+    SetEditor(Option<String>),
+    SetAutoUpdate(bool),
+    SignIn(String),
+    SignOut,
+    CheckForUpdates,
+    InstallUpdate,
+    RestartAfterUpdate,
+    DismissUpdate,
+
     SetTab(Tab),
     /// Leaves the detail pane in the narrow single-column layout.
     CloseDetail,
@@ -37,13 +54,32 @@ pub enum Action {
     SelectCommitFile(String),
     Commit,
     Discard(Vec<FileChange>),
+    IgnoreFile(String),
 
     Fetch,
     Pull,
     Push,
+    PublishToGitHub {
+        name: String,
+        description: String,
+        private: bool,
+    },
+    AddRemote(String),
     SwitchBranch(Branch),
     CreateBranch(String),
     DeleteBranch(String),
+
+    CreateTag {
+        name: String,
+        target: String,
+        message: String,
+        push: bool,
+    },
+    PushTag(String),
+    DeleteTag {
+        name: String,
+        on_remote: bool,
+    },
 
     StashAll,
     RestoreStash(String),

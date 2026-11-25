@@ -13,15 +13,36 @@ pub enum ThemeChoice {
     Dark,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     pub repositories: Vec<PathBuf>,
     pub selected_repository: Option<PathBuf>,
     pub window: WindowGeometry,
     pub theme: ThemeChoice,
-    /// Folder new clones and repositories are created in. Defaults to the home folder.
+    /// Folder new clones and repositories are created in: the last one used, or the home folder.
     pub projects_directory: Option<PathBuf>,
+    /// Command that opens the code editor, for example `code`. `None` picks the first installed one.
+    pub editor: Option<String>,
+    /// Login of the signed-in GitHub account. Its token is in the system keychain, never here.
+    pub github_login: Option<String>,
+    /// Check for and download new versions automatically.
+    pub auto_update: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            repositories: Vec::new(),
+            selected_repository: None,
+            window: WindowGeometry::default(),
+            theme: ThemeChoice::default(),
+            projects_directory: None,
+            editor: None,
+            github_login: None,
+            auto_update: true,
+        }
+    }
 }
 
 impl Settings {

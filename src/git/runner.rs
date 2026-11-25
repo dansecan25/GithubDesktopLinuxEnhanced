@@ -1,8 +1,10 @@
 use std::fmt;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
+use crate::constants::app::{ASKPASS_SOCKET_ENV, ASKPASS_TOKEN_ENV};
 use crate::constants::git::GIT_BINARY;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,6 +28,21 @@ impl std::error::Error for GitError {}
 
 pub type GitResult<T> = Result<T, GitError>;
 
+/// How git reaches the running app for credentials. Set once at startup by
+/// `services::askpass::AskpassServer::start`; without it (tests, CLI use) git never prompts.
+#[derive(Debug, Clone)]
+pub struct AskpassEnvironment {
+    pub executable: PathBuf,
+    pub socket: PathBuf,
+    pub token: String,
+}
+
+static ASKPASS: OnceLock<AskpassEnvironment> = OnceLock::new();
+
+pub fn configure_askpass(environment: AskpassEnvironment) {
+    let _ = ASKPASS.set(environment);
+}
+
 pub struct GitOutput {
     pub stdout: String,
     pub stderr: String,
@@ -34,8 +51,8 @@ pub struct GitOutput {
 
 /// Every git call in the app goes through here.
 ///
-/// Prompts are disabled because there is no terminal to answer them: credentials come from the
-/// user's credential helper or SSH agent, exactly like `git` in a script.
+/// Terminal prompts are disabled because there is no terminal. Credentials come from the user's
+/// credential helper or SSH agent, and otherwise from the askpass bridge, which asks in the app.
 pub fn run_raw(dir: &Path, args: &[&str], stdin: Option<&str>) -> GitResult<GitOutput> {
     let mut command = Command::new(GIT_BINARY);
     command
@@ -46,8 +63,15 @@ pub fn run_raw(dir: &Path, args: &[&str], stdin: Option<&str>) -> GitResult<GitO
         .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if std::env::var_os("GIT_SSH_COMMAND").is_none() {
-        // Without this, ssh would wait forever for a passphrase or host-key answer nobody can type.
+    if let Some(askpass) = ASKPASS.get() {
+        command
+            .env("GIT_ASKPASS", &askpass.executable)
+            .env("SSH_ASKPASS", &askpass.executable)
+            .env("SSH_ASKPASS_REQUIRE", "force")
+            .env(ASKPASS_SOCKET_ENV, &askpass.socket)
+            .env(ASKPASS_TOKEN_ENV, &askpass.token);
+    } else if std::env::var_os("GIT_SSH_COMMAND").is_none() {
+        // Without a way to ask, ssh would wait forever for an answer nobody can type.
         command.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes");
     }
 

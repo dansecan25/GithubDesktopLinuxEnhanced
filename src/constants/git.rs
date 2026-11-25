@@ -23,3 +23,6 @@ pub const GITHUB_HTTPS_PREFIX: &str = "https://github.com/";
 /// commit messages typed by people.
 pub const FIELD_SEP: char = '\u{1f}';
 pub const RECORD_SEP: char = '\u{1e}';
+
+/// Longer diff lines are cut for display (minified files, generated data).
+pub const MAX_DIFF_LINE_BYTES: usize = 2000;

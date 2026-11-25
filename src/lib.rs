@@ -1,6 +1,7 @@
 pub mod app;
 pub mod constants;
 pub mod git;
+pub mod github;
 pub mod models;
 pub mod services;
 pub mod stores;

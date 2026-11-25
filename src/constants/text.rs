@@ -9,11 +9,13 @@ pub const FETCH_ORIGIN: &str = "Fetch origin";
 pub const PULL_ORIGIN: &str = "Pull origin";
 pub const PUSH_ORIGIN: &str = "Push origin";
 pub const PUBLISH_BRANCH: &str = "Publish branch";
-pub const NO_REMOTE: &str = "No remote";
+pub const PUBLISH_REPOSITORY: &str = "Publish repository";
+pub const NOT_ON_GITHUB: &str = "Not on GitHub yet";
 pub const NEVER_FETCHED: &str = "Never fetched";
 pub const UP_TO_DATE: &str = "Up to date";
 pub const REFRESH: &str = "Refresh";
 pub const THEME: &str = "Theme";
+pub const APP_MENU: &str = "Menu";
 pub const THEME_SYSTEM: &str = "Follow system";
 pub const THEME_LIGHT: &str = "Light";
 pub const THEME_DARK: &str = "Dark";
@@ -105,6 +107,7 @@ pub const STASHING: &str = "Stashing";
 pub const RESTORING_STASH: &str = "Restoring stash";
 pub const DROPPING_STASH: &str = "Discarding stash";
 pub const DISCARDING: &str = "Discarding changes";
+pub const IGNORING: &str = "Updating .gitignore";
 pub const OPENING_REPOSITORY: &str = "Opening repository";
 pub const CLONING: &str = "Cloning";
 pub const CREATING_REPOSITORY: &str = "Creating repository";
@@ -148,4 +151,115 @@ pub fn ahead_behind(ahead: u32, behind: u32) -> String {
 
 pub fn busy(operation: &str) -> String {
     format!("{operation}…")
+}
+
+// Context menus
+pub const OPEN_IN_EDITOR_FALLBACK: &str = "Open in editor";
+pub const OPEN_WITH_DEFAULT_APP: &str = "Open with default program";
+pub const COPY_PATH: &str = "Copy full path";
+pub const COPY_RELATIVE_PATH: &str = "Copy relative path";
+pub const COPY_SHA: &str = "Copy commit SHA";
+pub const IGNORE_FILE: &str = "Ignore file (add to .gitignore)";
+pub const CREATE_TAG_HERE: &str = "Create tag…";
+pub const PUSH_TAG: &str = "Push tag";
+pub const DELETE_TAG: &str = "Delete tag…";
+
+// Preferences
+pub const PREFERENCES: &str = "Preferences…";
+pub const PREFERENCES_TITLE: &str = "Preferences";
+pub const EDITOR: &str = "Code editor";
+pub const EDITOR_AUTOMATIC: &str = "Automatic (first installed)";
+pub const EDITOR_CUSTOM: &str = "Custom command…";
+pub const EDITOR_CUSTOM_HINT: &str = "for example: code --new-window";
+pub const EDITOR_NONE_FOUND: &str = "No known editor found. Enter the command that starts yours.";
+pub const GITHUB_ACCOUNT: &str = "GitHub account";
+pub const TOKEN: &str = "Personal access token";
+pub const TOKEN_HINT: &str = "ghp_… or github_pat_…";
+pub const TOKEN_HELP: &str = "Create a classic token with the \"repo\" scope (or a fine-grained token with Contents and Administration access). It's stored in the system keychain and used for pushing, pulling and publishing.";
+pub const CREATE_TOKEN: &str = "Create a token on GitHub";
+pub const SIGN_IN: &str = "Sign in";
+pub const SIGN_OUT: &str = "Sign out";
+pub const SIGNING_IN: &str = "Signing in";
+pub const UPDATES: &str = "Updates";
+pub const AUTO_UPDATE: &str = "Check for updates automatically";
+pub const CHECK_NOW: &str = "Check now";
+pub const UPDATES_ONLY_INSTALLED: &str = "Only a copy installed with install.sh updates itself.";
+pub const CHECKING_UPDATES: &str = "Checking for updates…";
+pub const UP_TO_DATE_VERSION: &str = "You have the latest version.";
+pub const INSTALL: &str = "Install";
+pub const LATER: &str = "Later";
+pub const RESTART_NOW: &str = "Restart now";
+pub const CLOSE: &str = "Close";
+pub const SAVE: &str = "Save";
+
+// Credentials prompt
+pub const AUTHENTICATION_TITLE: &str = "Authentication required";
+pub const AUTHENTICATION_GITHUB_HINT: &str = "GitHub doesn't accept account passwords here: use a personal access token, or sign in under Menu → Preferences so you aren't asked again.";
+pub const OK: &str = "OK";
+
+// Publish
+pub const PUBLISH_TITLE: &str = "Publish repository";
+pub const PUBLISH_TO_GITHUB: &str = "Publish to GitHub";
+pub const PUBLISH_DESCRIPTION: &str = "Description";
+pub const PUBLISH_PRIVATE: &str = "Keep this code private";
+pub const PUBLISH_SIGN_IN_FIRST: &str = "Sign in to GitHub under Menu → Preferences to publish there.";
+pub const PUBLISH_EXISTING_REMOTE: &str = "Or connect an existing remote";
+pub const REMOTE_URL: &str = "Remote URL";
+pub const REMOTE_URL_HINT: &str = "https://github.com/owner/repo.git or git@github.com:owner/repo.git";
+pub const ADD_REMOTE_AND_PUSH: &str = "Add remote and push";
+
+// Tags
+pub const NEW_TAG: &str = "New tag on current commit…";
+pub const CREATE_TAG_TITLE: &str = "Create a tag";
+pub const TAG_NAME: &str = "Tag name";
+pub const TAG_SUGGESTIONS: &str = "Next version:";
+pub const TAG_MESSAGE: &str = "Message (makes an annotated tag, recommended for releases)";
+pub const TAG_PUSH: &str = "Push the tag to the remote";
+pub const TAG_RELEASE_HINT: &str =
+    "Pushing a vX.Y.Z tag starts this project's release workflow, if it has one.";
+pub const CREATE_TAG_BUTTON: &str = "Create tag";
+pub const TAGS: &str = "Tags";
+pub const DELETE_TAG_ON_REMOTE: &str = "Delete locally and on the remote";
+pub const DELETE_TAG_LOCALLY: &str = "Delete locally only";
+pub const PUBLISHING: &str = "Publishing";
+pub const CREATING_TAG: &str = "Creating tag";
+pub const PUSHING_TAG: &str = "Pushing tag";
+pub const DELETING_TAG: &str = "Deleting tag";
+pub const NOTHING_TO_PUBLISH: &str = "Make a first commit, then publish the branch.";
+pub const CHOOSE_EDITOR: &str = "No code editor was found. Choose one in Preferences.";
+
+pub fn open_in(editor: &str) -> String {
+    format!("Open in {editor}")
+}
+
+pub fn signed_in_as(login: &str) -> String {
+    format!("Signed in as {login}")
+}
+
+pub fn tag_target(short_sha: &str, summary: &str) -> String {
+    format!("On commit {short_sha}: {summary}")
+}
+
+pub fn delete_tag_body(name: &str) -> String {
+    format!("Delete the tag \"{name}\"?")
+}
+
+pub fn update_ready(version: &str) -> String {
+    format!("Version {version} is ready to install.")
+}
+
+pub fn update_downloading(version: &str) -> String {
+    format!("Downloading version {version}…")
+}
+
+pub fn update_installing(version: &str) -> String {
+    format!("Installing version {version}…")
+}
+
+pub fn update_installed(version: &str) -> String {
+    format!("Version {version} is installed. Restart to use it.")
+}
+
+pub fn current_version(version: &str) -> String {
+    format!("Current version: {version}")
 }

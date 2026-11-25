@@ -1,0 +1,26 @@
+/// Code editors looked for on `PATH`, in order of preference: (display name, command).
+/// Anything else can be set as a custom command in Preferences.
+pub const KNOWN_EDITORS: &[(&str, &str)] = &[
+    ("Visual Studio Code", "code"),
+    ("VSCodium", "codium"),
+    ("Visual Studio Code Insiders", "code-insiders"),
+    ("Cursor", "cursor"),
+    ("Zed", "zed"),
+    ("Zed", "zeditor"),
+    ("Sublime Text", "subl"),
+    ("JetBrains Fleet", "fleet"),
+    ("IntelliJ IDEA", "idea"),
+    ("PyCharm", "pycharm"),
+    ("CLion", "clion"),
+    ("RustRover", "rustrover"),
+    ("WebStorm", "webstorm"),
+    ("Kate", "kate"),
+    ("GNOME Builder", "gnome-builder"),
+    ("GNOME Text Editor", "gnome-text-editor"),
+    ("gedit", "gedit"),
+    ("Lapce", "lapce"),
+    ("Pulsar", "pulsar"),
+    ("Emacs", "emacs"),
+    ("Neovim Qt", "nvim-qt"),
+    ("GVim", "gvim"),
+];

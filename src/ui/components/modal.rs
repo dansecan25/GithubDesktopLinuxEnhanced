@@ -28,19 +28,37 @@ pub fn field_label(ui: &mut Ui, label: &str) {
 }
 
 /// Text field for a folder plus a "Choose…" button that opens the system folder picker.
+///
+/// The picker runs on its own thread: it waits for the desktop portal, and doing that on the UI
+/// thread froze the whole window whenever the portal was slow to answer.
 pub fn folder_picker(ui: &mut Ui, value: &mut String) {
+    let result_id = ui.scope_id().with("picked-folder");
+    let open_id = ui.scope_id().with("picker-open");
+    if let Some(folder) = ui.data_mut(|data| data.remove_temp::<String>(result_id)) {
+        *value = folder;
+    }
+    let picker_open = ui.data(|data| data.get_temp::<bool>(open_id).unwrap_or(false));
     ui.horizontal(|ui| {
         let button_space = 96.0;
         ui.add(egui::TextEdit::singleline(value).desired_width(ui.available_width() - button_space));
-        if secondary_button(ui, text::CHOOSE, true).clicked() {
+        if secondary_button(ui, text::CHOOSE, !picker_open).clicked() {
+            ui.data_mut(|data| data.insert_temp(open_id, true));
             let start = PathBuf::from(value.as_str());
-            let mut picker = rfd::FileDialog::new();
-            if start.is_dir() {
-                picker = picker.set_directory(start);
-            }
-            if let Some(folder) = picker.pick_folder() {
-                *value = folder.to_string_lossy().into_owned();
-            }
+            let ctx = ui.ctx().clone();
+            std::thread::spawn(move || {
+                let mut picker = rfd::FileDialog::new();
+                if start.is_dir() {
+                    picker = picker.set_directory(start);
+                }
+                let picked = picker.pick_folder();
+                ctx.data_mut(|data| {
+                    data.insert_temp(open_id, false);
+                    if let Some(folder) = picked {
+                        data.insert_temp(result_id, folder.to_string_lossy().into_owned());
+                    }
+                });
+                ctx.request_repaint();
+            });
         }
     });
 }

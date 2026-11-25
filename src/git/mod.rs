@@ -9,5 +9,6 @@ pub mod remote;
 pub mod repository;
 pub mod runner;
 pub mod stash;
+pub mod tags;
 
 pub use runner::{GitError, GitResult};

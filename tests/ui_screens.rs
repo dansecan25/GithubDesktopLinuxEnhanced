@@ -34,6 +34,7 @@ fn demo_repository(root: &Path) -> PathBuf {
     std::fs::write(repo.join("main.rs"), "fn main() {\n    println!(\"hello\");\n}\n").unwrap();
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "First commit", "-m", "Sets up the project."]);
+    git(&repo, &["tag", "-a", "v0.1.0", "-m", "First release"]);
     std::fs::write(repo.join("main.rs"), "fn main() {\n    println!(\"hello, world\");\n}\n").unwrap();
     std::fs::write(repo.join("notes.txt"), "remember to write docs\n").unwrap();
     repo
@@ -46,6 +47,14 @@ fn click_row(harness: &Harness<'_, DesktopApp>, label: &str) {
         .find(|node| node.accesskit_node().label().is_some_and(|text| text.starts_with(label)))
         .unwrap_or_else(|| panic!("no row starting with {label}"))
         .click();
+}
+
+fn right_click_row(harness: &Harness<'_, DesktopApp>, label: &str) {
+    harness
+        .get_all_by_role(egui::accesskit::Role::Button)
+        .find(|node| node.accesskit_node().label().is_some_and(|text| text.starts_with(label)))
+        .unwrap_or_else(|| panic!("no row starting with {label}"))
+        .click_secondary();
 }
 
 /// Steps until background git tasks have had time to finish.
@@ -61,6 +70,43 @@ fn save(harness: &mut Harness<'_, DesktopApp>, name: &str) {
     if let Ok(dir) = std::env::var("GDE_SCREENSHOT_DIR") {
         image.save(Path::new(&dir).join(format!("{name}.png"))).unwrap();
     }
+}
+
+/// Right-click menus and the new dialogs, in the wide layout.
+fn dialogs_and_menus(harness: &mut Harness<'_, DesktopApp>) {
+    // Back first: clicks land on the layout from the last frame, before any resize.
+    harness.get_by_label("← Back").click();
+    settle(harness);
+    harness.set_size(WIDE.into());
+    settle(harness);
+    right_click_row(harness, "main.rs");
+    settle(harness);
+    save(harness, "menu-file");
+    harness.key_press(egui::Key::Escape);
+    settle(harness);
+
+    harness.get_by_label("Menu").click();
+    settle(harness);
+    harness.get_by_label("Preferences…").click();
+    settle(harness);
+    save(harness, "dialog-preferences");
+    harness.get_by_label("Close").click();
+    settle(harness);
+
+    click_row(harness, "Publish repository");
+    settle(harness);
+    save(harness, "dialog-publish");
+    harness.get_by_label("Cancel").click();
+    settle(harness);
+
+    harness.get_by_label("History").click();
+    settle(harness);
+    right_click_row(harness, "First commit");
+    settle(harness);
+    save(harness, "menu-commit");
+    harness.get_by_label("Create tag…").click();
+    settle(harness);
+    save(harness, "dialog-tag");
 }
 
 #[test]
@@ -115,6 +161,10 @@ fn renders_main_screens() {
         click_row(&harness, "main.rs");
         settle(&mut harness);
         save(&mut harness, &format!("narrow-diff-{suffix}"));
+
+        if theme == ThemeChoice::Dark {
+            dialogs_and_menus(&mut harness);
+        }
     }
     let _ = std::fs::remove_dir_all(&root);
 }

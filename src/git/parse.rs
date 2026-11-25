@@ -1,8 +1,9 @@
 //! Pure parsers for git's machine-readable output. No process calls here, so everything is testable.
 
-use crate::constants::git::{FIELD_SEP, MAX_DIFF_BYTES, RECORD_SEP};
+use crate::constants::git::{BINARY_SNIFF_BYTES, FIELD_SEP, MAX_DIFF_BYTES, MAX_DIFF_LINE_BYTES, RECORD_SEP};
 use crate::models::{
     Branch, BranchStatus, ChangeKind, CommitSummary, Diff, DiffLine, DiffLineKind, FileChange, StashEntry,
+    Tag,
 };
 
 /// Parses `git status --porcelain=v2 --branch -z`.
@@ -169,6 +170,24 @@ pub fn parse_stashes(output: &str) -> Vec<StashEntry> {
         .collect()
 }
 
+/// The `--format` used by [`parse_tags`]: name, object, and the commit an annotated tag points to.
+pub fn tag_format() -> String {
+    format!("%(refname:short){FIELD_SEP}%(objectname){FIELD_SEP}%(*objectname)")
+}
+
+pub fn parse_tags(output: &str) -> Vec<Tag> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split(FIELD_SEP);
+            let name = fields.next()?.to_owned();
+            let object = fields.next()?;
+            let peeled = fields.next().filter(|value| !value.is_empty());
+            Some(Tag { name, commit: peeled.unwrap_or(object).to_owned() })
+        })
+        .collect()
+}
+
 /// Parses unified diff output into numbered lines.
 pub fn parse_diff(output: &str) -> Diff {
     let (text, is_truncated) = truncate_at_char_boundary(output, MAX_DIFF_BYTES);
@@ -204,7 +223,9 @@ pub fn parse_diff(output: &str) -> Diff {
             new_line += 1;
             (DiffLineKind::Context, Some(old_line - 1), Some(new_line - 1))
         };
-        diff.lines.push(DiffLine { kind, text: raw.to_owned(), old_number, new_number });
+        let (text, cut) = shorten_line(raw);
+        diff.is_truncated |= cut;
+        diff.lines.push(DiffLine { kind, text, old_number, new_number });
     }
     diff
 }
@@ -220,18 +241,42 @@ fn parse_hunk_header(line: &str) -> Option<(u32, u32)> {
 
 /// Builds an all-added diff for a file git doesn't track yet.
 pub fn diff_for_new_file(content: &str) -> Diff {
-    let (text, is_truncated) = truncate_at_char_boundary(content, MAX_DIFF_BYTES);
+    let (text, mut is_truncated) = truncate_at_char_boundary(content, MAX_DIFF_BYTES);
+    is_truncated |= text.lines().any(|line| line.len() > MAX_DIFF_LINE_BYTES);
     let lines = text
         .lines()
         .zip(1..)
         .map(|(line, number)| DiffLine {
             kind: DiffLineKind::Added,
-            text: format!("+{line}"),
+            text: format!("+{}", shorten_line(line).0),
             old_number: None,
             new_number: Some(number),
         })
         .collect();
     Diff { lines, is_binary: false, is_truncated }
+}
+
+/// Like git: a NUL byte near the start means binary. Content that isn't UTF-8 is treated as binary
+/// too, because showing it as text produces unreadable, very long lines.
+pub fn looks_binary(bytes: &[u8]) -> bool {
+    if bytes[..bytes.len().min(BINARY_SNIFF_BYTES)].contains(&0) {
+        return true;
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(_) => false,
+        // A multi-byte character cut by the read limit at the very end is still text.
+        Err(error) => error.error_len().is_some() || error.valid_up_to() + 4 < bytes.len(),
+    }
+}
+
+/// Cuts lines longer than [`MAX_DIFF_LINE_BYTES`], so a minified or generated file can't make
+/// every frame lay out megabytes of text.
+fn shorten_line(line: &str) -> (String, bool) {
+    if line.len() <= MAX_DIFF_LINE_BYTES {
+        return (line.to_owned(), false);
+    }
+    let (start, _) = truncate_at_char_boundary(line, MAX_DIFF_LINE_BYTES);
+    (format!("{start}…"), true)
 }
 
 fn truncate_at_char_boundary(text: &str, max_bytes: usize) -> (&str, bool) {
@@ -337,8 +382,33 @@ mod tests {
     }
 
     #[test]
+    fn tags_use_the_peeled_commit_of_annotated_tags() {
+        let s = FIELD_SEP;
+        let tags = parse_tags(&format!("v1.0.0{s}tagobj{s}commit1\nlight{s}commit2{s}\n"));
+        assert_eq!(tags[0], Tag { name: "v1.0.0".into(), commit: "commit1".into() });
+        assert_eq!(tags[1].commit, "commit2");
+    }
+
+    #[test]
     fn diff_flags_binary() {
         assert!(parse_diff("diff --git a/x b/x\nBinary files a/x and b/x differ\n").is_binary);
+    }
+
+    #[test]
+    fn binary_detection() {
+        assert!(looks_binary(b"abc\0def"));
+        assert!(looks_binary(&[0x25, 0x50, 0xff, 0xfe, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46]));
+        assert!(!looks_binary("plain text ñ\n".as_bytes()));
+        // A character cut at the end by the read limit.
+        assert!(!looks_binary(&"ñ".as_bytes()[..1]));
+    }
+
+    #[test]
+    fn very_long_lines_are_cut() {
+        let long = "x".repeat(MAX_DIFF_LINE_BYTES * 3);
+        let diff = diff_for_new_file(&long);
+        assert!(diff.is_truncated);
+        assert!(diff.lines[0].text.len() < MAX_DIFF_LINE_BYTES + 8);
     }
 
     #[test]

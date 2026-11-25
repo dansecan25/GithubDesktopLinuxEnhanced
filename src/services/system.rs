@@ -6,13 +6,17 @@ const OPENER: &str = "open";
 #[cfg(not(target_os = "macos"))]
 const OPENER: &str = "xdg-open";
 
-/// Opens a folder in the desktop's file manager without waiting for it.
-pub fn open_in_file_manager(path: &Path) -> std::io::Result<()> {
-    Command::new(OPENER)
-        .arg(path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map(|_| ())
+/// Starts a program without waiting for it. A thread waits in the background so the finished
+/// process doesn't linger as a zombie.
+pub fn spawn_detached(mut command: Command) -> std::io::Result<()> {
+    let mut child = command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()?;
+    std::thread::spawn(move || child.wait());
+    Ok(())
+}
+
+/// Opens a folder in the file manager, or a file in its default app.
+pub fn open_with_system(path: &Path) -> std::io::Result<()> {
+    let mut command = Command::new(OPENER);
+    command.arg(path);
+    spawn_detached(command)
 }

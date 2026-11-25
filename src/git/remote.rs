@@ -2,6 +2,7 @@ use std::path::Path;
 
 use super::runner::{GitError, GitResult, run};
 use crate::constants::git::DEFAULT_REMOTE;
+use crate::constants::text;
 use crate::models::BranchStatus;
 
 /// `origin` when it exists, otherwise the first configured remote.
@@ -29,9 +30,21 @@ pub fn push(path: &Path, status: &BranchStatus, remote: Option<&str>) -> GitResu
         run(path, &["push"])?;
         return Ok(());
     }
+    if !status.has_commits {
+        return Err(GitError::new(text::NOTHING_TO_PUBLISH));
+    }
     let branch =
         status.head.as_deref().ok_or_else(|| GitError::new("Switch to a branch before publishing"))?;
     let remote = remote.ok_or_else(|| GitError::new("This repository has no remote to push to"))?;
     run(path, &["push", "--set-upstream", remote, branch])?;
+    Ok(())
+}
+
+/// Connects the repository to a remote (`origin` when it has none yet).
+pub fn add(path: &Path, name: &str, url: &str) -> GitResult<()> {
+    if url.trim().is_empty() {
+        return Err(GitError::new("Enter the remote's URL"));
+    }
+    run(path, &["remote", "add", "--", name, url.trim()])?;
     Ok(())
 }

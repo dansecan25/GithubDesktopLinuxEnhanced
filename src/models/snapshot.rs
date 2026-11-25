@@ -1,4 +1,4 @@
-use super::{Branch, FileChange, StashEntry};
+use super::{Branch, FileChange, StashEntry, Tag};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BranchStatus {
@@ -18,5 +18,7 @@ pub struct RepoSnapshot {
     pub changes: Vec<FileChange>,
     pub branches: Vec<Branch>,
     pub stashes: Vec<StashEntry>,
+    /// Newest first.
+    pub tags: Vec<Tag>,
     pub remote: Option<String>,
 }

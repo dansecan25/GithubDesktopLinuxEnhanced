@@ -9,8 +9,11 @@ use crate::ui::components::{
 };
 use crate::ui::dialogs::Dialog;
 
+use super::{ViewContext, context_menus};
+
 /// Left pane of the Changes tab: file list, stashes and the commit form.
-pub fn changes_list(ui: &mut Ui, repo: &mut RepoStore, busy: bool, actions: &mut Vec<Action>) {
+pub fn changes_list(ui: &mut Ui, repo: &mut RepoStore, view: &ViewContext<'_>, actions: &mut Vec<Action>) {
+    let busy = view.busy.is_some();
     let Some(snapshot) = repo.snapshot.ready() else {
         return loadable_status(ui, &repo.snapshot);
     };
@@ -49,10 +52,11 @@ pub fn changes_list(ui: &mut Ui, repo: &mut RepoStore, busy: bool, actions: &mut
             });
     }
 
-    egui::CentralPanel::no_frame().show(ui, |ui| file_list(ui, repo, busy, actions));
+    egui::CentralPanel::no_frame().show(ui, |ui| file_list(ui, repo, view, actions));
 }
 
-fn file_list(ui: &mut Ui, repo: &mut RepoStore, busy: bool, actions: &mut Vec<Action>) {
+fn file_list(ui: &mut Ui, repo: &mut RepoStore, view: &ViewContext<'_>, actions: &mut Vec<Action>) {
+    let busy = view.busy.is_some();
     let changes = repo.changes().to_vec();
     if changes.is_empty() {
         return empty_state(ui, text::NO_CHANGES_TITLE, text::NO_CHANGES_BODY);
@@ -75,7 +79,7 @@ fn file_list(ui: &mut Ui, repo: &mut RepoStore, busy: bool, actions: &mut Vec<Ac
                     actions.push(Action::StashAll);
                 }
                 if ui.add_enabled(!busy, egui::Button::new(text::DISCARD_ALL_CHANGES)).clicked() {
-                    actions.push(discard_confirmation(changes.clone()));
+                    actions.push(context_menus::discard_confirmation(changes.clone()));
                 }
             });
         });
@@ -93,26 +97,9 @@ fn file_list(ui: &mut Ui, repo: &mut RepoStore, busy: bool, actions: &mut Vec<Ac
             if row.clicked() {
                 actions.push(Action::SelectFile(change.path.clone()));
             }
-            row.context_menu(|ui| {
-                if ui.add_enabled(!busy, egui::Button::new(text::DISCARD_CHANGES)).clicked() {
-                    actions.push(discard_confirmation(vec![change.clone()]));
-                }
-                if ui.button(text::SHOW_IN_FILE_MANAGER).clicked() {
-                    let folder = repo.path.join(&change.path).parent().map(|p| p.to_path_buf());
-                    actions.push(Action::ShowInFileManager(folder.unwrap_or_else(|| repo.path.clone())));
-                }
-            });
+            row.context_menu(|ui| context_menus::working_file(ui, view, &repo.path, change, actions));
         }
     });
-}
-
-fn discard_confirmation(changes: Vec<crate::models::FileChange>) -> Action {
-    Action::OpenDialog(Dialog::confirm(
-        text::DISCARD_CHANGES,
-        text::discard_files_body(changes.len()),
-        text::DISCARD_BUTTON,
-        Action::Discard(changes),
-    ))
 }
 
 fn commit_form(ui: &mut Ui, repo: &mut RepoStore, branch: &str, busy: bool, actions: &mut Vec<Action>) {

@@ -1,11 +1,10 @@
-use std::path::Path;
-
 use eframe::egui::{self, Popup, PopupCloseBehavior, RichText, Ui};
 
+use super::{ViewContext, context_menus};
 use crate::constants::layout::{MIN_TARGET_SIZE, SIDEBAR_DEFAULT_WIDTH};
 use crate::constants::text;
 use crate::models::{Branch, RepoSnapshot};
-use crate::services::settings::{Settings, ThemeChoice};
+use crate::services::settings::ThemeChoice;
 use crate::stores::RepoStore;
 use crate::ui::actions::Action;
 use crate::ui::components::toolbar_button;
@@ -13,30 +12,26 @@ use crate::ui::dialogs::Dialog;
 use crate::ui::theme::{self, TOOLBAR_TEXT};
 use crate::utils::paths::display_name;
 
-pub fn toolbar(
-    ui: &mut Ui,
-    settings: &Settings,
-    repo: Option<&RepoStore>,
-    busy: Option<&str>,
-    actions: &mut Vec<Action>,
-) {
+pub fn toolbar(ui: &mut Ui, view: &ViewContext<'_>, repo: Option<&RepoStore>, actions: &mut Vec<Action>) {
     let background = theme::palette(ui.visuals()).toolbar_background;
     egui::Panel::top("toolbar")
         .frame(egui::Frame::new().fill(background).inner_margin(egui::Margin::symmetric(8, 4)))
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                repository_menu(ui, settings, repo, actions);
-                if let Some(snapshot) = repo.and_then(|repo| repo.snapshot.ready()) {
+                repository_menu(ui, view, repo, actions);
+                if let Some(repo) = repo
+                    && let Some(snapshot) = repo.snapshot.ready()
+                {
                     ui.separator();
-                    branch_menu(ui, snapshot, busy.is_some(), actions);
+                    branch_menu(ui, view, repo, snapshot, actions);
                     ui.separator();
-                    sync_button(ui, snapshot, busy, actions);
+                    sync_button(ui, repo, snapshot, view.busy, actions);
                 }
                 ui.separator();
                 if repo.is_some() && icon_button(ui, "↻", text::REFRESH).clicked() {
                     actions.push(Action::Refresh);
                 }
-                theme_menu(ui, settings.theme, actions);
+                app_menu(ui, view, actions);
             });
         });
 }
@@ -50,9 +45,13 @@ fn icon_button(ui: &mut Ui, icon: &str, label: &str) -> egui::Response {
     response
 }
 
-fn repository_menu(ui: &mut Ui, settings: &Settings, repo: Option<&RepoStore>, actions: &mut Vec<Action>) {
+fn repository_menu(ui: &mut Ui, view: &ViewContext<'_>, repo: Option<&RepoStore>, actions: &mut Vec<Action>) {
+    let settings = view.settings;
     let name = repo.map(|repo| display_name(&repo.path)).unwrap_or_else(|| text::NO_REPOSITORY.to_owned());
     let response = toolbar_button(ui, text::CURRENT_REPOSITORY, &format!("{name} ▾"), true);
+    if let Some(repo) = repo {
+        response.context_menu(|ui| context_menus::repository(ui, view, &repo.path, actions));
+    }
     Popup::menu(&response).width(SIDEBAR_DEFAULT_WIDTH).show(|ui| {
         ui.label(RichText::new(text::REPOSITORIES).strong());
         if settings.repositories.is_empty() {
@@ -69,7 +68,7 @@ fn repository_menu(ui: &mut Ui, settings: &Settings, repo: Option<&RepoStore>, a
             if row.clicked() {
                 actions.push(Action::SelectRepository(path.clone()));
             }
-            repository_context_menu(&row, path, actions);
+            row.context_menu(|ui| context_menus::repository(ui, view, path, actions));
         }
         ui.separator();
         if ui.button(text::ADD_EXISTING).clicked() {
@@ -84,18 +83,14 @@ fn repository_menu(ui: &mut Ui, settings: &Settings, repo: Option<&RepoStore>, a
     });
 }
 
-fn repository_context_menu(row: &egui::Response, path: &Path, actions: &mut Vec<Action>) {
-    row.context_menu(|ui| {
-        if ui.button(text::SHOW_IN_FILE_MANAGER).clicked() {
-            actions.push(Action::ShowInFileManager(path.to_path_buf()));
-        }
-        if ui.button(text::REMOVE_REPOSITORY).clicked() {
-            actions.push(Action::RemoveRepository(path.to_path_buf()));
-        }
-    });
-}
-
-fn branch_menu(ui: &mut Ui, snapshot: &RepoSnapshot, busy: bool, actions: &mut Vec<Action>) {
+fn branch_menu(
+    ui: &mut Ui,
+    view: &ViewContext<'_>,
+    repo: &RepoStore,
+    snapshot: &RepoSnapshot,
+    actions: &mut Vec<Action>,
+) {
+    let busy = view.busy.is_some();
     let current = snapshot.status.head.clone().unwrap_or_else(|| text::DETACHED_HEAD.to_owned());
     let response = toolbar_button(ui, text::CURRENT_BRANCH, &format!("{current} ▾"), !busy);
     Popup::menu(&response)
@@ -104,6 +99,13 @@ fn branch_menu(ui: &mut Ui, snapshot: &RepoSnapshot, busy: bool, actions: &mut V
         .show(|ui| {
             if ui.button(text::NEW_BRANCH).clicked() {
                 actions.push(Action::OpenDialog(Dialog::create_branch(&current)));
+                ui.close();
+            }
+            let head_commit = repo.history.ready().and_then(|commits| commits.first());
+            if ui.add_enabled(head_commit.is_some(), egui::Button::new(text::NEW_TAG)).clicked()
+                && let Some(commit) = head_commit
+            {
+                actions.push(context_menus::tag_dialog(snapshot, commit));
                 ui.close();
             }
             let filter_id = ui.scope_id().with("branch-filter");
@@ -171,7 +173,13 @@ fn branch_row(ui: &mut Ui, branch: &Branch, actions: &mut Vec<Action>) {
 
 /// One button that becomes Publish, Pull, Push or Fetch depending on the branch state, as in
 /// GitHub Desktop.
-fn sync_button(ui: &mut Ui, snapshot: &RepoSnapshot, busy: Option<&str>, actions: &mut Vec<Action>) {
+fn sync_button(
+    ui: &mut Ui,
+    repo: &RepoStore,
+    snapshot: &RepoSnapshot,
+    busy: Option<&str>,
+    actions: &mut Vec<Action>,
+) {
     let status = &snapshot.status;
     if let Some(operation) = busy {
         ui.spinner();
@@ -179,7 +187,9 @@ fn sync_button(ui: &mut Ui, snapshot: &RepoSnapshot, busy: Option<&str>, actions
         return;
     }
     if snapshot.remote.is_none() {
-        toolbar_button(ui, text::NO_REMOTE, "", false);
+        if toolbar_button(ui, text::PUBLISH_REPOSITORY, text::NOT_ON_GITHUB, true).clicked() {
+            actions.push(Action::OpenDialog(Dialog::publish(&display_name(&repo.path))));
+        }
         return;
     }
     let ahead_behind = text::ahead_behind(status.ahead, status.behind);
@@ -199,15 +209,21 @@ fn sync_button(ui: &mut Ui, snapshot: &RepoSnapshot, busy: Option<&str>, actions
     }
 }
 
-fn theme_menu(ui: &mut Ui, current: ThemeChoice, actions: &mut Vec<Action>) {
-    let response = icon_button(ui, "◐", text::THEME);
+/// Preferences, theme and updates.
+fn app_menu(ui: &mut Ui, view: &ViewContext<'_>, actions: &mut Vec<Action>) {
+    let response = icon_button(ui, "⋯", text::APP_MENU);
     Popup::menu(&response).show(|ui| {
+        if ui.button(text::PREFERENCES).clicked() {
+            actions.push(Action::OpenDialog(Dialog::preferences(view.settings, view.editors)));
+        }
+        ui.separator();
+        ui.label(RichText::new(text::THEME).strong());
         for (choice, label) in [
             (ThemeChoice::System, text::THEME_SYSTEM),
             (ThemeChoice::Light, text::THEME_LIGHT),
             (ThemeChoice::Dark, text::THEME_DARK),
         ] {
-            if ui.add(egui::Button::selectable(current == choice, label)).clicked() {
+            if ui.add(egui::Button::selectable(view.settings.theme == choice, label)).clicked() {
                 actions.push(Action::SetTheme(choice));
             }
         }
