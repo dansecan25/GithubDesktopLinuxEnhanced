@@ -46,6 +46,8 @@ fn demo_repository(root: &Path) -> PathBuf {
     git(&repo, &["init", "-q", "-b", "main"]);
     std::fs::write(repo.join("main.rs"), "fn main() {\n    println!(\"hello\");\n}\n").unwrap();
     std::fs::write(repo.join("logo.png"), logo([0x1f, 0x6f, 0xeb, 0xff])).unwrap();
+    // The tag dialog checks the tag against this version.
+    std::fs::write(repo.join("Cargo.toml"), "[package]\nname = \"demo\"\nversion = \"0.2.0\"\n").unwrap();
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "First commit", "-m", "Sets up the project."]);
     git(&repo, &["tag", "-a", "v0.1.0", "-m", "First release"]);
@@ -289,7 +291,18 @@ fn dialogs_and_menus(harness: &mut Harness<'_, DesktopApp>, repo: &Path) {
     save(harness, "menu-commit");
     harness.get_by_label("Create tag…").click();
     settle(harness);
+    assert!(
+        harness.query_by_label("Matches the version in Cargo.toml (0.2.0).").is_some(),
+        "the dialog should offer v0.2.0 from Cargo.toml"
+    );
     save(harness, "dialog-tag");
+    harness.get_by_label("v0.1.1").click();
+    settle(harness);
+    assert!(
+        harness.query_by_label_contains("Cargo.toml says 0.2.0 on this commit, not v0.1.1").is_some(),
+        "mismatch warning"
+    );
+    save(harness, "dialog-tag-mismatch");
 }
 
 #[test]

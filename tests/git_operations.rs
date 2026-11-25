@@ -667,3 +667,30 @@ fn image_changes_have_before_and_after_previews() {
     assert_eq!(first.before, ImageSide::Missing);
     assert!(matches!(first.after, ImageSide::Image(_)));
 }
+
+#[test]
+fn project_versions_come_from_the_tagged_commit() {
+    let repo = TempRepo::new();
+    let write = |path: &str, content: &str| {
+        let file = repo.0.join(path);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, content).unwrap();
+    };
+    // A Flutter app one folder down, like free_player, plus files that must be ignored.
+    write("README.md", "player\n");
+    write("free_music_player/pubspec.yaml", "name: player\nversion: 1.0.0+4\n");
+    write("free_music_player/build/web/package.json", r#"{"version": "9.9.9"}"#);
+    write("node_modules/left-pad/package.json", r#"{"version": "1.3.0"}"#);
+    write("tools/scripts/deep/Cargo.toml", "[package]\nversion = \"5.0.0\"\n");
+    git(&repo.0, &["add", "-f", "."]);
+    git(&repo.0, &["commit", "-m", "first"]);
+    let first = git(&repo.0, &["rev-parse", "HEAD"]).trim().to_owned();
+    write("free_music_player/pubspec.yaml", "name: player\nversion: 1.1.0+5\n");
+    git(&repo.0, &["commit", "-am", "bump"]);
+
+    let versions = tags::project_versions(&repo.0, &first).unwrap();
+    let found: Vec<(&str, &str)> = versions.iter().map(|v| (v.path.as_str(), v.version.as_str())).collect();
+    assert_eq!(found, [("free_music_player/pubspec.yaml", "1.0.0")]);
+    let head = tags::project_versions(&repo.0, "HEAD").unwrap();
+    assert_eq!(head[0].version, "1.1.0");
+}

@@ -80,7 +80,10 @@ in `Cargo.toml`. Nothing machine-specific belongs in this repository. Use a giti
   fetch, pull, push, publish, tag pushes and clone can be cancelled.
 - `askpass::automatic_answer` gives the github.com token only to prompts for `https://github.com`
   exactly (host parsed, port 443 at most). Up to 0.1.0 it matched `//github.com` as a substring, so
-  a remote like `https://github.com.example.net` would have received the token; fixed for 0.2.0.
+  a remote like `https://github.com.example.net` would have received the token; fixed in 0.3.0 (0.2.0 was never released: its tags pointed at commits with the wrong version).
+- The tag dialog reads version files from the tagged commit (`tags::project_versions`), not the
+  working tree, because that's what a release workflow checks out. Added after `v0.2.0` and `v0.2.1`
+  were tagged on commits whose `Cargo.toml` said 0.1.0 and 0.2.0, so both releases failed.
 - GitHub Enterprise Server and `*.ghe.com` aren't supported beyond plain git: the API base, OAuth
   and `github::web_url` are fixed to github.com. Supporting them needs a per-account host, API base
   and OAuth app, and the token kept per host.

@@ -96,6 +96,16 @@ impl DesktopApp {
             | TaskOutput::CommentPosted { .. }
             | TaskOutput::PullCreated { .. }
             | TaskOutput::PullFetched { .. }) => self.apply_pull_output(pull),
+            TaskOutput::ProjectVersions { repo, target, result } => {
+                let is_current = self.repo_path().as_ref() == Some(&repo);
+                if let Some(Dialog::CreateTag(form)) = self.dialog.as_mut()
+                    && is_current
+                    && form.target == target
+                {
+                    // Without version files (or if they can't be read) there is simply no check.
+                    form.set_versions(result.unwrap_or_default());
+                }
+            }
             TaskOutput::Organizations(result) => {
                 if let Some(Dialog::Publish(form)) = self.dialog.as_mut() {
                     form.organizations = match result {

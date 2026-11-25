@@ -63,3 +63,12 @@ pub const MAX_PREVIEW_FILE_BYTES: usize = 50 * 1024 * 1024;
 pub const MAX_PREVIEW_PIXELS: u64 = 60_000_000;
 /// File extensions shown as pictures in the diff.
 pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "webp", "gif", "bmp", "ico"];
+
+/// Files whose version a release tag must match: Rust, Node and Flutter projects.
+pub const VERSION_FILES: &[&str] = &["Cargo.toml", "package.json", "pubspec.yaml"];
+/// Version files are looked for at the root and one folder down (a Flutter app in a subfolder).
+pub const VERSION_FILE_MAX_DEPTH: usize = 1;
+/// Folders whose version files belong to dependencies or build output, not the project.
+pub const VERSION_FILE_SKIPPED_FOLDERS: &[&str] =
+    &["node_modules", "build", "target", "vendor", ".dart_tool", "dist"];
+pub const MAX_VERSION_FILE_BYTES: usize = 1024 * 1024;

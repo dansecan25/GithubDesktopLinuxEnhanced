@@ -10,7 +10,8 @@ use crate::constants::text;
 use crate::git::GitResult;
 use crate::github::device::DeviceCode;
 use crate::models::{
-    Branch, CommitSummary, ConflictFile, Diff, FileChange, MergePreview, PullDetail, PullList, RepoSnapshot,
+    Branch, CommitSummary, ConflictFile, Diff, FileChange, MergePreview, ProjectVersion, PullDetail,
+    PullList, RepoSnapshot,
 };
 use crate::services::askpass::GitHubAccount;
 
@@ -110,6 +111,12 @@ pub enum TaskOutput {
         result: GitResult<ConflictFile>,
     },
     Organizations(Result<Vec<String>, String>),
+    /// Version files on the commit the tag dialog is about to tag.
+    ProjectVersions {
+        repo: PathBuf,
+        target: String,
+        result: GitResult<Vec<ProjectVersion>>,
+    },
     Pulls {
         repo: PathBuf,
         result: Result<PullList, String>,
@@ -160,6 +167,7 @@ impl TaskOutput {
             Self::MergePreview { .. } => "showing a merge preview",
             Self::Conflict { .. } => "showing a conflict",
             Self::Organizations(_) => "listing organizations",
+            Self::ProjectVersions { .. } => "reading the project version",
             Self::Pulls { .. } => "listing pull requests",
             Self::PullDetail { .. } => "showing a pull request",
             Self::CommentPosted { .. } => "posting a comment",

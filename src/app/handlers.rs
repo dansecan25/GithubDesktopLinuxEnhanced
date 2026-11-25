@@ -180,6 +180,9 @@ impl DesktopApp {
             }
             Action::OpenDialog(dialog) => {
                 let publishing = matches!(dialog, Dialog::Publish(_));
+                if let Dialog::CreateTag(form) = &dialog {
+                    self.load_project_versions(form.target.clone());
+                }
                 self.dialog = Some(dialog);
                 self.dialog_opening += 1;
                 if publishing {
@@ -485,6 +488,16 @@ impl DesktopApp {
     }
 
     /// Creates the repository on GitHub, connects it as `origin` and pushes the current branch.
+    /// Reads the version files on the commit the tag dialog will tag.
+    fn load_project_versions(&mut self, target: String) {
+        let Some(path) = self.repo_path() else { return };
+        self.tasks.spawn(move || TaskOutput::ProjectVersions {
+            result: tags::project_versions(&path, &target),
+            repo: path,
+            target,
+        });
+    }
+
     /// Lists the account's organizations for the publish dialog.
     fn load_organizations(&mut self) {
         match self.token() {

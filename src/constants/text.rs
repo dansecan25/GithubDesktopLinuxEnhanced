@@ -507,3 +507,17 @@ pub fn image_details(width: u32, height: u32, bytes: usize) -> String {
     };
     format!("{width} × {height} · {size}")
 }
+
+pub fn tag_matches_version(path: &str, version: &str) -> String {
+    format!("Matches the version in {path} ({version}).")
+}
+
+/// `found` is (file, version) for every version file on the commit.
+pub fn tag_version_mismatch(tag: &str, found: &[(String, String)]) -> String {
+    let files: Vec<String> = found.iter().map(|(path, version)| format!("{path} says {version}")).collect();
+    format!(
+        "{} on this commit, not {tag}. A release workflow that checks the version will fail: change the \
+         version, commit it, and tag that commit.",
+        files.join(", ")
+    )
+}

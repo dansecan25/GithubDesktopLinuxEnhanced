@@ -1,8 +1,38 @@
 use std::path::Path;
 
-use super::parse;
 use super::runner::{GitError, GitResult, run, run_with_input};
-use crate::models::Tag;
+use super::{changes, parse};
+use crate::constants::git::{
+    MAX_VERSION_FILE_BYTES, VERSION_FILE_MAX_DEPTH, VERSION_FILE_SKIPPED_FOLDERS, VERSION_FILES,
+};
+use crate::models::{ProjectVersion, Tag};
+use crate::utils::version::version_in_file;
+
+/// The project versions written at `commit`: version files at the root and one folder down, the
+/// root first. Dependencies' and build folders' files are skipped.
+pub fn project_versions(path: &Path, commit: &str) -> GitResult<Vec<ProjectVersion>> {
+    let files = run(path, &["ls-tree", "-r", "--name-only", commit])?;
+    let mut candidates: Vec<&str> = files
+        .lines()
+        .filter(|file| {
+            let parts: Vec<&str> = file.split('/').collect();
+            let name = parts.last().copied().unwrap_or_default();
+            VERSION_FILES.contains(&name)
+                && parts.len() <= VERSION_FILE_MAX_DEPTH + 1
+                && !parts.iter().any(|part| VERSION_FILE_SKIPPED_FOLDERS.contains(part))
+        })
+        .collect();
+    candidates.sort_by_key(|file| (file.matches('/').count(), *file));
+    let mut versions = Vec::new();
+    for file in candidates {
+        let name = file.rsplit('/').next().unwrap_or(file);
+        let Ok(bytes) = changes::file_at(path, commit, file, MAX_VERSION_FILE_BYTES) else { continue };
+        if let Some(version) = version_in_file(name, &String::from_utf8_lossy(&bytes)) {
+            versions.push(ProjectVersion { path: file.to_owned(), version });
+        }
+    }
+    Ok(versions)
+}
 
 /// All tags, newest first.
 pub fn list(path: &Path) -> GitResult<Vec<Tag>> {

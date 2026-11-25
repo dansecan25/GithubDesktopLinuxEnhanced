@@ -18,4 +18,4 @@ pub use merge::MergePreview;
 pub use pull::{Checks, PullComment, PullDetail, PullList, PullRequest};
 pub use snapshot::{BranchStatus, RepoSnapshot};
 pub use stash::StashEntry;
-pub use tag::Tag;
+pub use tag::{ProjectVersion, Tag};

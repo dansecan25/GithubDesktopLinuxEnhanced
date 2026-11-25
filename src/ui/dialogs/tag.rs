@@ -1,11 +1,14 @@
-use eframe::egui::{self, Ui};
+use eframe::egui::{self, RichText, Ui};
 
 use super::{DialogContext, focus_once, footer_buttons};
 use crate::constants::layout::COMMIT_DESCRIPTION_ROWS;
 use crate::constants::text;
+use crate::models::ProjectVersion;
+use crate::stores::Loadable;
 use crate::ui::actions::Action;
 use crate::ui::components::{danger_button, field_label, muted_text, rounded, secondary_button};
-use crate::utils::version::next_versions;
+use crate::ui::theme;
+use crate::utils::version::{next_versions, parse_version, tag_matches};
 
 #[derive(Debug, Clone)]
 pub struct TagForm {
@@ -17,6 +20,10 @@ pub struct TagForm {
     pub push: bool,
     pub has_remote: bool,
     pub suggestions: [String; 3],
+    /// Tags that already exist, so a version that is already tagged isn't suggested again.
+    pub existing: Vec<String>,
+    /// Versions in the project's version files at `target`, to check the tag against.
+    pub versions: Loadable<Vec<ProjectVersion>>,
 }
 
 impl TagForm {
@@ -31,7 +38,23 @@ impl TagForm {
             push: has_remote,
             has_remote,
             suggestions,
+            existing: existing_tags.to_vec(),
+            versions: Loadable::Loading,
         }
+    }
+
+    /// Takes the versions read from the commit. When the name is still the first suggestion and
+    /// the project's version isn't tagged yet, the name becomes that version: after bumping
+    /// `Cargo.toml` to 0.3.0, the dialog offers `v0.3.0`, not the next patch.
+    pub fn set_versions(&mut self, versions: Vec<ProjectVersion>) {
+        if let Some(first) = versions.first()
+            && self.name == self.suggestions[0]
+            && !self.existing.iter().any(|tag| tag_matches(tag, &first.version))
+            && parse_version(&first.version).is_some()
+        {
+            self.name = format!("v{}", first.version.trim_start_matches('v'));
+        }
+        self.versions = Loadable::Ready(versions);
     }
 }
 
@@ -40,6 +63,7 @@ pub fn show_create(ui: &mut Ui, context: &DialogContext<'_>, form: &mut TagForm,
     field_label(ui, text::TAG_NAME);
     let field = ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(f32::INFINITY));
     focus_once(ui, &field, context.opening);
+    version_check(ui, form);
     ui.horizontal_wrapped(|ui| {
         ui.label(text::TAG_SUGGESTIONS);
         for suggestion in form.suggestions.clone() {
@@ -68,6 +92,29 @@ pub fn show_create(ui: &mut Ui, context: &DialogContext<'_>, form: &mut TagForm,
             message: form.message.trim().to_owned(),
             push: form.push && form.has_remote,
         });
+    }
+}
+
+/// Says whether a version tag matches the project's version files on that commit. Release
+/// workflows check this, and a mismatch makes them fail.
+fn version_check(ui: &mut Ui, form: &TagForm) {
+    let Loadable::Ready(versions) = &form.versions else { return };
+    if versions.is_empty() || parse_version(&form.name).is_none() {
+        return;
+    }
+    let palette = theme::palette(ui.visuals());
+    match versions.iter().find(|file| tag_matches(&form.name, &file.version)) {
+        Some(file) => {
+            ui.label(
+                RichText::new(text::tag_matches_version(&file.path, &file.version)).color(palette.added),
+            );
+        }
+        None => {
+            let found: Vec<(String, String)> =
+                versions.iter().map(|file| (file.path.clone(), file.version.clone())).collect();
+            let warning = text::tag_version_mismatch(form.name.trim(), &found);
+            ui.add(egui::Label::new(RichText::new(warning).color(palette.danger)).wrap());
+        }
     }
 }
 

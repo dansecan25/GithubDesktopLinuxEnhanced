@@ -159,6 +159,13 @@ version, write the release notes as the message, keep **Push the tag to the remo
 click **Create tag**. In this repository, pushing a `vX.Y.Z` tag starts the release workflow, which
 builds the package and creates a draft release to review and publish.
 
+The dialog checks the tag against the project's version on that commit: `version` in `Cargo.toml`
+(Rust), `package.json` (Node) or `pubspec.yaml` (Flutter, without the `+build` number), at the root
+or one folder down. After you bump the version and commit, it offers that version as the tag, and it
+warns in red when the tag doesn't match, because a release workflow that checks the version would
+fail. Commit the version change *before* tagging: the tag points to a commit, and rebuilding the
+same tag never picks up a later commit.
+
 ### Updates
 
 The app checks [Releases](https://github.com/dansecan25/GithubDesktopLinuxEnhanced/releases) when
