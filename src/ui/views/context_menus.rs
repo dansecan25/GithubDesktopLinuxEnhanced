@@ -105,6 +105,26 @@ pub fn commit(
         tag_dialog(snapshot.expect("enabled only with a snapshot"), commit)
     });
     item(ui, text::COPY_SHA, true, actions, || Action::CopyText(commit.sha.clone()));
+    let is_head = snapshot.is_some_and(|s| s.status.head_sha.as_deref() == Some(commit.sha.as_str()));
+    if let Some(snapshot) = snapshot.filter(|_| is_head) {
+        let enabled = !busy && !snapshot.is_busy_merging();
+        ui.separator();
+        item(ui, text::AMEND_COMMIT, enabled, actions, || {
+            rewrite_confirmation(snapshot, text::AMEND_BUTTON, text::AMENDING_IT, Action::StartAmend)
+        });
+        item(ui, text::UNDO_COMMIT, enabled, actions, || {
+            rewrite_confirmation(snapshot, text::UNDO, text::UNDOING_IT, Action::UndoCommit)
+        });
+    }
+}
+
+/// Amending or undoing a pushed commit asks first; an unpushed one just goes ahead.
+pub fn rewrite_confirmation(snapshot: &RepoSnapshot, title: &str, doing: &str, action: Action) -> Action {
+    if !snapshot.head_pushed {
+        return action;
+    }
+    let remote = snapshot.remote.as_deref().unwrap_or(crate::constants::git::DEFAULT_REMOTE);
+    Action::OpenDialog(Dialog::confirm(title, text::rewrite_pushed_body(doing, remote), title, action))
 }
 
 /// For a branch in the branch menu.

@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use super::runner::{GitError, GitResult, run};
-use super::{branches, merge, parse, remote, stash, tags};
+use super::{branches, commits, merge, parse, rebase, remote, stash, tags};
 use crate::constants::git::{DEFAULT_BRANCH, GITHUB_HTTPS_PREFIX};
 use crate::models::RepoSnapshot;
 
@@ -68,7 +68,9 @@ pub fn load_snapshot(path: &Path) -> GitResult<RepoSnapshot> {
         Some(name) => remote::url(path, name).ok(),
         None => None,
     };
+    let head_pushed = status.has_commits && commits::head_is_pushed(path);
     Ok(RepoSnapshot {
+        head_pushed,
         status,
         changes,
         branches: branches::list(path)?,
@@ -77,6 +79,8 @@ pub fn load_snapshot(path: &Path) -> GitResult<RepoSnapshot> {
         remote,
         remote_url,
         merge_message: merge::message(path),
+        squash_message: merge::squash_message(path),
+        rebase: rebase::state(path),
     })
 }
 

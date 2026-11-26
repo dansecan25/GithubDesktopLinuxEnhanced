@@ -2,9 +2,9 @@
 
 use std::path::PathBuf;
 
-use crate::models::{Branch, ConflictChoice, FileChange};
+use crate::models::{Branch, ConflictChoice, FileChange, LineTarget, MergeMethod};
 use crate::services::settings::ThemeChoice;
-use crate::ui::dialogs::{Dialog, PullForm};
+use crate::ui::dialogs::{Dialog, PullEditForm, PullForm};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tab {
@@ -12,6 +12,14 @@ pub enum Tab {
     Changes,
     History,
     PullRequests,
+}
+
+/// The two parts of a pull request's page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PullView {
+    #[default]
+    Conversation,
+    Files,
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +63,23 @@ pub enum Action {
     },
     OpenCreatePull,
     CreatePull(PullForm),
+    SetPullView(PullView),
+    SelectPullFile(String),
+    /// Opens the comment field for a line of the selected pull request's diff.
+    StartLineComment(LineTarget),
+    CancelLineComment,
+    PostLineComment,
+    SubmitReview,
+    MergePull {
+        number: u64,
+        method: MergeMethod,
+    },
+    OpenEditPull,
+    SavePull(PullEditForm),
+    SetDraft {
+        number: u64,
+        draft: bool,
+    },
     SignOut,
     CheckForUpdates,
     InstallUpdate,
@@ -70,12 +95,19 @@ pub enum Action {
     SelectCommit(String),
     SelectCommitFile(String),
     Commit,
+    /// Puts the last commit's message in the commit form; the next commit replaces it.
+    StartAmend,
+    CancelAmend,
+    /// Removes the last commit, keeping its changes uncommitted and its message in the form.
+    UndoCommit,
     Discard(Vec<FileChange>),
     IgnoreFile(String),
 
     Fetch,
     Pull,
     Push,
+    /// Pushes a branch whose history was rewritten here (`--force-with-lease`).
+    ForcePush,
     PublishToGitHub {
         name: String,
         description: String,
@@ -95,8 +127,14 @@ pub enum Action {
     DeleteBranch(String),
     /// Works out what merging this branch into the current one would do, for the merge dialog.
     PreviewMerge(String),
-    Merge(String),
+    Merge {
+        branch: String,
+        method: MergeMethod,
+    },
+    /// Aborts the merge or squash merge in progress.
     AbortMerge,
+    ContinueRebase,
+    AbortRebase,
     /// Resolves one conflict block of a file with your side, theirs or both.
     ResolveConflict {
         file: String,

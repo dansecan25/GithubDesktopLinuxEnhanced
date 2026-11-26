@@ -14,8 +14,8 @@ pub use buttons::{
     with_hover_shading,
 };
 pub use clicks::{dropdown_menu, left_clicked, record_secondary_presses, right_click_menu};
-pub use diff_view::{LinePicker, diff_view};
+pub use diff_view::{LineNote, LineNotes, LinePicker, diff_view, diff_view_with_notes};
 pub use file_row::{file_row, list_divider};
-pub use messages::{empty_state, error_banner, loadable_status, muted_text};
+pub use messages::{empty_state, error_banner, loadable_status, muted_text, option_hint};
 pub use modal::{DialogResult, dialog, field_label, folder_picker};
 pub use progress::operation_status;

@@ -1,15 +1,16 @@
-//! Pull requests: listing, the conversation, comments, creating one, and checking out its branch.
+//! Pull requests: listing, the conversation, files and line comments, reviews, merging, editing,
+//! creating one, and checking out its branch.
 
 use super::DesktopApp;
 use crate::constants::git::DEFAULT_REMOTE;
 use crate::constants::text;
 use crate::git::remote;
 use crate::github::{self, pulls};
-use crate::models::PullRequest;
+use crate::models::{LineTarget, MergeMethod, PullRequest, PullSend};
 use crate::services::tasks::{OperationKind, TaskOutput};
 use crate::stores::Loadable;
-use crate::ui::actions::Tab;
-use crate::ui::dialogs::{Dialog, PullForm};
+use crate::ui::actions::{PullView, Tab};
+use crate::ui::dialogs::{Dialog, PullEditForm, PullForm};
 
 impl DesktopApp {
     /// `owner/name` of the open repository on github.com, if its remote is there.
@@ -32,6 +33,10 @@ impl DesktopApp {
         let Some(repo) = self.repo.as_mut() else { return };
         if repo.selected_pull != Some(number) {
             repo.pull_comment.clear();
+            repo.review_body.clear();
+            repo.line_comment = None;
+            repo.selected_pull_file = None;
+            repo.pull_view = PullView::Conversation;
         }
         repo.selected_pull = Some(number);
         repo.pull_detail = Loadable::Loading;
@@ -51,19 +56,104 @@ impl DesktopApp {
         });
     }
 
-    pub(super) fn post_comment(&mut self, number: u64, body: String) {
+    /// Sends something about pull request `number` to GitHub in the background. Only one thing is
+    /// sent at a time.
+    fn send_pull(
+        &mut self,
+        number: u64,
+        sent: PullSend,
+        job: impl FnOnce(&str, &str) -> Result<(), String> + Send + 'static,
+    ) {
         let (Some(token), Some(slug)) = (self.token(), self.github_slug()) else { return };
         let Some(repo) = self.repo.as_mut() else { return };
-        if repo.pull_sending || body.trim().is_empty() {
+        if repo.pull_sending {
             return;
         }
         repo.pull_sending = true;
         let path = repo.path.clone();
-        self.tasks.spawn(move || TaskOutput::CommentPosted {
-            result: pulls::comment(&token, &slug, number, body.trim()),
+        self.tasks.spawn(move || TaskOutput::PullSent {
+            result: job(&token, &slug),
             repo: path,
             number,
+            sent,
         });
+    }
+
+    /// The selected pull request, when it is `number`.
+    fn pull(&self, number: u64) -> Option<PullRequest> {
+        self.repo.as_ref()?.selected_pull().filter(|pull| pull.number == number).cloned()
+    }
+
+    pub(super) fn post_comment(&mut self, number: u64, body: String) {
+        if body.trim().is_empty() {
+            return;
+        }
+        self.send_pull(number, PullSend::Comment, move |token, slug| {
+            pulls::comment(token, slug, number, body.trim())
+        });
+    }
+
+    pub(super) fn start_line_comment(&mut self, target: LineTarget) {
+        let Some(repo) = self.repo.as_mut() else { return };
+        // A draft for the same line is kept.
+        if repo.line_comment.as_ref().is_none_or(|(current, _)| *current != target) {
+            repo.line_comment = Some((target, String::new()));
+        }
+    }
+
+    pub(super) fn post_line_comment(&mut self) {
+        let Some(repo) = self.repo.as_ref() else { return };
+        let Some(pull) = repo.selected_pull().cloned() else { return };
+        let Some((target, body)) = repo.line_comment.clone().filter(|(_, body)| !body.trim().is_empty())
+        else {
+            return;
+        };
+        self.send_pull(pull.number, PullSend::LineComment, move |token, slug| {
+            pulls::line_comment(token, slug, pull.number, &pull.head_sha, &target, body.trim())
+        });
+    }
+
+    pub(super) fn submit_review(&mut self) {
+        let Some(repo) = self.repo.as_ref() else { return };
+        let Some(pull) = repo.selected_pull().cloned() else { return };
+        let (event, body) = (repo.review_event, repo.review_body.clone());
+        if event.needs_body() && body.trim().is_empty() {
+            return;
+        }
+        self.send_pull(pull.number, PullSend::Review, move |token, slug| {
+            pulls::review(token, slug, pull.number, &pull.head_sha, event, body.trim())
+        });
+    }
+
+    pub(super) fn merge_pull(&mut self, number: u64, method: MergeMethod) {
+        let Some(pull) = self.pull(number) else { return };
+        self.send_pull(number, PullSend::Merge, move |token, slug| {
+            pulls::merge(token, slug, number, &pull.head_sha, method)
+        });
+    }
+
+    pub(super) fn open_edit_pull(&mut self) {
+        let Some(pull) = self.repo.as_ref().and_then(|repo| repo.selected_pull().cloned()) else { return };
+        let form = PullEditForm { number: pull.number, title: pull.title, body: pull.body };
+        self.dialog = Some(Dialog::EditPull(form));
+        self.dialog_opening += 1;
+    }
+
+    pub(super) fn save_pull(&mut self, form: PullEditForm) {
+        self.send_pull(form.number, PullSend::Edit, move |token, slug| {
+            pulls::edit(token, slug, form.number, form.title.trim(), form.body.trim())
+        });
+    }
+
+    pub(super) fn set_draft(&mut self, number: u64, draft: bool) {
+        let node_id = self
+            .repo
+            .as_ref()
+            .and_then(|repo| repo.pull_detail.ready())
+            .map(|detail| detail.node_id.clone())
+            .filter(|id| !id.is_empty());
+        let Some(node_id) = node_id else { return };
+        self.send_pull(number, PullSend::Draft, move |token, _| pulls::set_draft(token, &node_id, draft));
     }
 
     /// Opens the create dialog for the current branch, into the default branch.
@@ -181,17 +271,30 @@ impl DesktopApp {
                     };
                 }
             }
-            TaskOutput::CommentPosted { repo: path, number, result } if is_current(&path) => {
+            TaskOutput::PullSent { repo: path, number, sent, result } if is_current(&path) => {
                 let Some(repo) = self.repo.as_mut() else { return };
                 repo.pull_sending = false;
-                match result {
-                    Ok(()) => {
-                        repo.pull_comment.clear();
-                        if repo.selected_pull == Some(number) {
-                            self.load_pull_detail();
+                if let Err(error) = result {
+                    self.error = Some(error);
+                    return;
+                }
+                match sent {
+                    PullSend::Comment => repo.pull_comment.clear(),
+                    PullSend::LineComment => repo.line_comment = None,
+                    PullSend::Review => repo.review_body.clear(),
+                    PullSend::Edit => {
+                        if matches!(self.dialog, Some(Dialog::EditPull(_))) {
+                            self.dialog = None;
                         }
                     }
-                    Err(error) => self.error = Some(error),
+                    PullSend::Draft | PullSend::Merge => {}
+                }
+                // Title, draft state and merged pull requests show in the list too.
+                if matches!(sent, PullSend::Edit | PullSend::Draft | PullSend::Merge) {
+                    self.load_pulls();
+                }
+                if self.repo.as_ref().is_some_and(|repo| repo.selected_pull == Some(number)) {
+                    self.load_pull_detail();
                 }
             }
             TaskOutput::PullCreated { repo: path, result } if is_current(&path) => {
@@ -219,7 +322,7 @@ impl DesktopApp {
                 self.load_snapshot();
             }
             // Results for a repository that was closed meanwhile.
-            TaskOutput::CommentPosted { .. } | TaskOutput::PullCreated { .. } => {
+            TaskOutput::PullSent { .. } | TaskOutput::PullCreated { .. } => {
                 if let Some(repo) = self.repo.as_mut() {
                     repo.pull_sending = false;
                 }

@@ -48,3 +48,32 @@ pub fn show(ui: &mut Ui, context: &DialogContext<'_>, form: &mut PullForm, actio
         actions.push(Action::CreatePull(form.clone()));
     }
 }
+
+/// Changing an open pull request's title and description.
+#[derive(Debug, Clone)]
+pub struct PullEditForm {
+    pub number: u64,
+    pub title: String,
+    pub body: String,
+}
+
+pub fn show_edit(
+    ui: &mut Ui,
+    context: &DialogContext<'_>,
+    form: &mut PullEditForm,
+    actions: &mut Vec<Action>,
+) {
+    field_label(ui, text::PULL_TITLE);
+    let field = ui.add(egui::TextEdit::singleline(&mut form.title).desired_width(f32::INFINITY));
+    focus_once(ui, &field, context.opening);
+    field_label(ui, text::PULL_DESCRIPTION);
+    ui.add(
+        egui::TextEdit::multiline(&mut form.body)
+            .desired_rows(COMMIT_DESCRIPTION_ROWS * 2)
+            .desired_width(f32::INFINITY),
+    );
+    let ready = !form.title.trim().is_empty() && !context.sending;
+    if footer_buttons(ui, text::SAVE, ready, false, actions) {
+        actions.push(Action::SavePull(form.clone()));
+    }
+}

@@ -23,7 +23,7 @@ src/
   app/               Controller
     mod.rs           State, startup and the per-frame loop
     handlers.rs      What each Action does (starts background tasks)
-    pulls.rs         Pull requests: load, select, comment, create, check out
+    pulls.rs         Pull requests: load, select, comment, review, merge, edit, draft, create, check out
     results.rs       Applies finished tasks to the state
     window.rs        Window size tracking, refresh on focus, keyboard shortcuts
   constants/         Fixed values: app ids, layout, git limits, GitHub/update values, known editors,
@@ -37,16 +37,19 @@ src/
     changes.rs       Working-tree diff, commit, discard, .gitignore
     history.rs       Log, files in a commit, diff of a file in a commit
     branches.rs      List, switch, create, delete, sanitize names
-    remote.rs        Fetch, pull, push / publish, add a remote
+    remote.rs        Fetch, pull, push / publish, force push with lease, add a remote
     stash.rs         List, stash all, restore, drop
     tags.rs          List, create (lightweight or annotated), push, delete
-    merge.rs         Merge preview (commits, conflicts), merge, abort, unresolved conflict check
+    merge.rs         Merge preview (commits, conflicts), merge, squash merge, abort, unresolved conflict check
+    rebase.rs        Rebase onto a branch, continue, abort, read a stopped rebase's state
+    commits.rs       Undo the last commit, its message, whether it is pushed, co-author trailers
     conflicts.rs     Parse conflict markers, resolve a block, take a side, mark resolved
     partial.rs       Commit chosen lines: rebuild the index with a patch per partly chosen file
     control.rs       Progress and cancelling for long operations (clone, fetch, pull, push)
   github/            GitHub REST API: check a token, organizations, create a repository, latest release
     device.rs        Browser sign-in (OAuth device flow)
-    pulls.rs         Pull requests: list, conversation and checks, comment, create
+    pulls.rs         Pull requests: list, conversation, reviews, files, line comments, checks, comment,
+                     review, merge, edit, draft state (GraphQL), create
   services/          Non-UI services
     tasks.rs         Background threads and the result channel
     askpass.rs       Credential bridge between git/ssh and the app (see below)
@@ -58,7 +61,8 @@ src/
     system.rs        Open with the desktop's default app; start programs without zombies
     image_preview.rs Decode the before and after pictures of a changed image, within memory limits
     memory_cap.rs    Relaunch inside a memory-limited systemd scope; start other programs outside it
-    watchdog.rs      Freeze and memory reports, and closing the app before it slows the computer
+    watchdog.rs      Freeze, stall and memory reports, and closing the app before it slows the computer
+    graphics.rs      Presenting without vsync, and the 60 fps frame cap
   stores/            UI state for the open repository (RepoStore) and the Loadable wrapper
   ui/
     actions.rs       Every user intent as an Action enum
@@ -67,13 +71,14 @@ src/
     components/      Shared widgets: buttons, file row, diff view, image diff, progress, clicks, dialog frame, folder picker
     dialogs/         Repository, branch, merge, switch, confirmation, preferences, publish, pull
                      request, tag, browser sign-in and credential dialogs
-    views/           Toolbar, Changes, History, Pull requests, conflict editor, welcome, right-click
-                     menus, update bar, layout
-  utils/             Small pure helpers (path display, version numbers)
+    views/           Toolbar, Changes, History, Pull requests (conversation; files with line comments),
+                     conflict editor, welcome, right-click menus, update bar, layout
+  utils/             Small pure helpers (path display, version numbers, "3 days ago" times)
 tests/
   git_operations.rs  Integration tests against real throwaway repositories and bare remotes
   askpass.rs         The credential bridge end to end, with the real binary and real git
   ui_screens.rs      Headless render of the screens, menus and dialogs (ignored by default)
+  pull_screens.rs    Headless render of the pull request pages with made-up data (ignored by default)
   readme_screenshots.rs  Renders docs/screenshots/ from a made-up project (ignored by default)
 docs/screenshots/    README images
 packaging/           Desktop entry, icon, per-user install script (also used by the updater)
@@ -132,11 +137,17 @@ Every call sets `GIT_TERMINAL_PROMPT=0` and the askpass variables described unde
 | Feature | Command |
 |---|---|
 | Status | `git status --porcelain=v2 --branch -z --untracked-files=all` |
-| Branches | `git for-each-ref refs/heads refs/remotes` with a field-separated format |
+| Branches | `git for-each-ref --sort=-committerdate refs/heads refs/remotes` with a field-separated format, including `%(committerdate:unix)` for "3 days ago" |
 | Stashes | `git stash list` with a field-separated format |
 | Working diff | `git diff -M HEAD -- <path>` (the empty tree hash before the first commit). New files are read from disk |
 | Commit all | `git add --all`, then `git commit --file -` (message on stdin) |
 | Commit some | `git add --all -- <paths>`, then `git commit --file - --only -- <paths>` |
+| Commit lines | `git reset`, `git add` the whole files, `git apply --cached --recount` per partly chosen file (`git hash-object -w --path` and `git update-index --add --cacheinfo` for new files), `git commit` |
+| Amend | The same, with `--amend` (`git commit --amend --only` changes just the message) |
+| Undo commit | `git reset --soft HEAD~1`, or `git update-ref -d HEAD` for the first commit |
+| Squash merge | `git merge --squash --no-commit <branch>`, then `git commit --file -` |
+| Rebase | `git -c core.editor=true rebase <branch>`, `rebase --continue` (or `--skip` when nothing is staged), `rebase --abort` |
+| Force push | `git push --force-with-lease` |
 | Discard | `git clean -f` for new files, `git rm -f` for added files, `git restore --source=HEAD --staged --worktree` for the rest |
 | History | `git log --max-count=500` with a field- and record-separated format |
 | Commit files | `git diff-tree -r -z --name-status --root -m --first-parent <sha>` |
@@ -166,7 +177,7 @@ Every call sets `GIT_TERMINAL_PROMPT=0` and the askpass variables described unde
 | `selected_repository` | The one opened on start |
 | `window` | `width`, `height` (logical points) and `maximized` |
 | `theme` | `System`, `Light` or `Dark` |
-| `projects_directory` | Folder last used to clone or create a repository (home folder when empty) |
+| `projects_directory` | Folder holding the last repository added, cloned or created; dialogs and the folder picker start there (home folder when empty) |
 | `editor` | Command for "Open in editor", or empty for the first installed editor |
 | `github_login` | Login of the signed-in account. The token itself is in the keychain |
 | `auto_update` | Check for and download updates automatically (default on) |

@@ -48,18 +48,42 @@ in `Cargo.toml`. Nothing machine-specific belongs in this repository. Use a giti
   it happens again, note the exact steps. Since then the watchdog (`services/watchdog.rs`) writes
   a report to `~/.local/state/github-desktop-enhanced/reports/` when a frame takes over 5 s: ask
   for it.
+- A freeze "after some time open" was reported (2026-11-26): clicks did nothing and the app had to
+  be closed. No freeze report was written and the app was idle (low CPU, under 210 MB), so the main
+  thread wasn't stuck in a frame: it was stuck outside one, in presenting. The laptop has only the
+  NVIDIA GPU (driver 595, Wayland), where a vsync (FIFO) present can block for good once the window
+  is hidden or the screen goes off. Fixed by presenting without vsync (`services/graphics.rs`,
+  `AutoNoVsync`) plus a 60 fps cap (`FrameLimiter`). Not reproduced, so not proven. The watchdog
+  now also writes a `stall` report when a focused window isn't drawn for 15 s, naming the GPU; if
+  the freeze comes back, ask for it. (Changing the GPU preference was tried first and dropped:
+  there's no second GPU on that laptop.)
 - Right-click menus are drawn by `ui/components/clicks.rs`, not egui's own context menu. egui keeps
   one popup open at a time, so its menus closed the dropdown they were opened from, and some
   touchpads send a left click with the right click. Use `right_click_menu`, `left_clicked` and
   `dropdown_menu` for any new menu or clickable row.
 - Conflicts are resolved block by block in `ui/views/conflict.rs` (`git/conflicts.rs` parses the
   markers, keeping line endings). Committing is still refused while a conflicted file has conflict
-  markers (`git/merge.rs`). Squash and rebase merges aren't offered.
+  markers (`git/merge.rs`).
+- Squash merges (`merge::squash`) run `git merge --squash` and commit with a message listing the
+  branch's commit summaries, written to `SQUASH_MSG` so a squash stopped on conflicts shows it in
+  the form. `RepoSnapshot::in_progress` tells a merge, a squash and a rebase apart. Rebases
+  (`git/rebase.rs`) need a clean working tree, run without an editor (`-c core.editor=true`), and
+  skip a commit that ends up empty after resolving. During a rebase the conflict editor names the
+  sides "From <onto>" and "Your commit", because git's "ours" is the branch rebased onto.
 - Line-by-line commits (`git/partial.rs`) reset the index and rebuild it: whole files are added and
   partly chosen files get a patch applied with `git apply --cached --recount`. Anything staged
-  outside the app is unstaged, as GitHub Desktop does. Lines can't be picked in renames, deletions,
-  conflicts, binary or cut diffs, or during a merge. Files with CRLF line endings may fail to apply
-  (diff lines are stored without `\r`); the error is shown and nothing is committed.
+  outside the app is unstaged, as GitHub Desktop does. Diff lines remember a `\r\n` ending
+  (`DiffLine::crlf`) and patches put it back. A partly chosen deletion becomes a modification (its
+  header is rewritten), and a rename keeps its rename headers. New files skip patches: the chosen
+  lines are stored with `git hash-object -w --path`, so `core.autocrlf` and `.gitattributes`
+  apply as with `git add`. Lines can't be picked in conflicts, binary or cut diffs, during a merge
+  (git only commits a merge whole, a git rule rather than a missing feature) or during a rebase.
+- Undo (`commits::undo_last`) is `git reset --soft HEAD~1`, or `git update-ref -d HEAD` for the
+  first commit. Amend uses `git commit --amend` (with `--only` and no paths to change only the
+  message). `RepoSnapshot::head_pushed` (HEAD is on a remote-tracking branch) decides whether to
+  warn. A branch rewritten in the app is remembered in `RepoStore::rewritten_branches` for the
+  session, and while it is both ahead and behind, the sync button offers a force push
+  (`--force-with-lease`). The memory is per session: after a restart the button shows Pull again.
 - Diff text is selected by whole lines, not characters: the diff only lays out visible rows.
 - Image previews (`services/image_preview.rs`) decode in background tasks with the `image` crate
   (already in the tree through egui's clipboard, so only the WebP, GIF, BMP and ICO decoders were
@@ -89,8 +113,14 @@ in `Cargo.toml`. Nothing machine-specific belongs in this repository. Use a giti
   and OAuth app, and the token kept per host.
 - The OAuth app (Client ID in `constants/github.rs`) has only Device Flow enabled: no client secret,
   no expiring tokens, no wildcard redirects. Its name on GitHub is "Git Desktop Linux Enhanced".
-- Pull requests show the conversation (issue comments) and a checks summary. Review comments on
-  lines, reviews, merging a pull request and editing one are done on GitHub (**Open on GitHub**).
+- Pull requests (`github/pulls.rs`) read the pull request, its comments, reviews, line comments and
+  files (every page, up to 3,000 files) and the checks. Line comments go under their lines in
+  `diff_view_with_notes`, as extra rows wrapped to the diff's width so `show_rows` still works. A
+  line that already has a thread gets replies (`/comments/{id}/replies`). Merging sends the head SHA
+  so GitHub refuses if new commits arrived. Draft and ready-for-review use GraphQL (the REST API
+  can't change them), which reports errors with status 200, so its `errors` array is checked.
+  Review comments are posted one at a time ("Add single comment"); pending reviews with several
+  comments aren't offered. Merged branches aren't deleted from the app.
 - A repository whose folder was moved or deleted stays in the list and shows git's error until it is
   removed from the list.
 - Stashes tied to a branch use GitHub Desktop's message format (`!!GitHub_Desktop<branch>`), so
@@ -104,7 +134,9 @@ in `Cargo.toml`. Nothing machine-specific belongs in this repository. Use a giti
 
 - Against real GitHub (only mocked JSON and local bare remotes in tests): browser sign-in after
   approval (the device code request itself was checked against GitHub), listing organizations and
-  publishing into one, listing pull requests with checks, commenting, creating a pull request.
+  publishing into one, listing pull requests with checks, commenting, creating a pull request,
+  line comments and replies, reviews, merging, editing, and the draft switch (GraphQL). The pull
+  request pages were rendered with made-up data (`tests/pull_screens.rs`).
 - Network remotes on GitHub: sign-in with a real token, publishing a repository through the API, and
   pushing or pulling over HTTPS with the token. Tests cover the same git commands against local bare
   remotes, and real git getting credentials through the askpass bridge, but not GitHub itself.

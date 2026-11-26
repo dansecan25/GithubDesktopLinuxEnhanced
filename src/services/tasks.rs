@@ -11,13 +11,16 @@ use crate::git::GitResult;
 use crate::github::device::DeviceCode;
 use crate::models::{
     Branch, CommitSummary, ConflictFile, Diff, FileChange, MergePreview, ProjectVersion, PullDetail,
-    PullList, RepoSnapshot,
+    PullList, PullSend, RepoSnapshot,
 };
 use crate::services::askpass::GitHubAccount;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperationKind {
     Commit,
+    Amend,
+    UndoCommit,
+    ForcePush,
     Fetch,
     Pull,
     Push,
@@ -26,6 +29,8 @@ pub enum OperationKind {
     DeleteBranch,
     Merge,
     AbortMerge,
+    Rebase,
+    AbortRebase,
     Resolve,
     Stash,
     RestoreStash,
@@ -41,12 +46,18 @@ pub enum OperationKind {
 impl OperationKind {
     /// Network operations, which can take long and are safe to stop part way.
     pub fn can_cancel(self) -> bool {
-        matches!(self, Self::Fetch | Self::Pull | Self::Push | Self::Publish | Self::PushTag)
+        matches!(
+            self,
+            Self::Fetch | Self::Pull | Self::Push | Self::ForcePush | Self::Publish | Self::PushTag
+        )
     }
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Commit => text::COMMITTING,
+            Self::Amend => text::AMENDING,
+            Self::UndoCommit => text::UNDOING_COMMIT,
+            Self::ForcePush => text::FORCE_PUSHING,
             Self::Fetch => text::FETCHING,
             Self::Pull => text::PULLING,
             Self::Push => text::PUSHING,
@@ -55,6 +66,8 @@ impl OperationKind {
             Self::DeleteBranch => text::DELETING_BRANCH,
             Self::Merge => text::MERGING,
             Self::AbortMerge => text::ABORTING_MERGE,
+            Self::Rebase => text::REBASING,
+            Self::AbortRebase => text::ABORTING_REBASE,
             Self::Resolve => text::RESOLVING,
             Self::Stash => text::STASHING,
             Self::RestoreStash => text::RESTORING_STASH,
@@ -99,11 +112,10 @@ pub enum TaskOutput {
         kind: OperationKind,
         result: GitResult<()>,
     },
-    /// Result of adding, cloning or creating a repository. `remember_folder` becomes the default
-    /// folder for the next clone or new repository.
+    /// Result of adding, cloning or creating a repository: its root folder. The folder it's in
+    /// becomes the starting folder for the next add, clone or new repository.
     RepositoryOpened {
         result: GitResult<PathBuf>,
-        remember_folder: Option<PathBuf>,
     },
     Conflict {
         repo: PathBuf,
@@ -126,9 +138,11 @@ pub enum TaskOutput {
         number: u64,
         result: Result<PullDetail, String>,
     },
-    CommentPosted {
+    /// A comment, review, edit, draft change or merge was sent for pull request `number`.
+    PullSent {
         repo: PathBuf,
         number: u64,
+        sent: PullSend,
         result: Result<(), String>,
     },
     PullCreated {
@@ -170,7 +184,7 @@ impl TaskOutput {
             Self::ProjectVersions { .. } => "reading the project version",
             Self::Pulls { .. } => "listing pull requests",
             Self::PullDetail { .. } => "showing a pull request",
-            Self::CommentPosted { .. } => "posting a comment",
+            Self::PullSent { .. } => "updating a pull request",
             Self::PullCreated { .. } => "creating a pull request",
             Self::PullFetched { .. } => "checking out a pull request",
             Self::DeviceCode(_) => "starting browser sign-in",

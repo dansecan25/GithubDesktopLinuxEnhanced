@@ -119,7 +119,7 @@ pub fn run_raw(dir: &Path, args: &[&str], stdin: Option<&str>) -> GitResult<GitO
 }
 
 fn run_limited(dir: &Path, args: &[&str], stdin: Option<&str>, max_stdout: usize) -> GitResult<GitOutput> {
-    let (stdout, output) = run_limited_bytes(dir, args, stdin, max_stdout)?;
+    let (stdout, output) = run_limited_bytes(dir, args, stdin.map(str::as_bytes), max_stdout)?;
     Ok(GitOutput { stdout: String::from_utf8_lossy(&stdout).into_owned(), ..output })
 }
 
@@ -128,7 +128,7 @@ fn run_limited(dir: &Path, args: &[&str], stdin: Option<&str>, max_stdout: usize
 fn run_limited_bytes(
     dir: &Path,
     args: &[&str],
-    stdin: Option<&str>,
+    stdin: Option<&[u8]>,
     max_stdout: usize,
 ) -> GitResult<(Vec<u8>, GitOutput)> {
     let mut command = Command::new(GIT_BINARY);
@@ -160,8 +160,7 @@ fn run_limited_bytes(
         command.spawn().map_err(|error| GitError::new(format!("Could not start git: {error}")))?;
     let _running = Registration::new(args);
     if let (Some(input), Some(mut pipe)) = (stdin, child.stdin.take()) {
-        pipe.write_all(input.as_bytes())
-            .map_err(|error| GitError::new(format!("Could not write to git: {error}")))?;
+        pipe.write_all(input).map_err(|error| GitError::new(format!("Could not write to git: {error}")))?;
     }
     let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
         return Err(GitError::new("Could not read git's output"));
@@ -278,6 +277,16 @@ pub fn run_with_input(dir: &Path, args: &[&str], stdin: Option<&str>) -> GitResu
         )));
     }
     if output.exit_code == 0 { Ok(output.stdout) } else { Err(error_from_output(&output)) }
+}
+
+/// Like [`run_with_input`], with bytes on stdin (file content that may not be UTF-8).
+pub fn run_with_bytes(dir: &Path, args: &[&str], stdin: &[u8]) -> GitResult<String> {
+    let (stdout, output) = run_limited_bytes(dir, args, Some(stdin), MAX_GIT_OUTPUT_BYTES)?;
+    if output.exit_code == 0 {
+        Ok(String::from_utf8_lossy(&stdout).into_owned())
+    } else {
+        Err(error_from_output(&output))
+    }
 }
 
 /// Runs git and returns its raw stdout, for binary content. Output over `max_bytes` is an error.

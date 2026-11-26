@@ -3,12 +3,14 @@
 use eframe::egui::{self, RichText, Ui};
 
 use super::ViewContext;
-use crate::constants::layout::{COMMIT_DESCRIPTION_ROWS, LIST_ROW_HEIGHT, PANEL_PADDING};
+use crate::constants::layout::{COMMIT_DESCRIPTION_ROWS, LIST_ROW_HEIGHT, MIN_TARGET_SIZE, PANEL_PADDING};
 use crate::constants::text;
-use crate::models::{PullDetail, PullRequest};
+use crate::models::{MergeMethod, PullDetail, PullRequest, ReviewEvent};
 use crate::stores::{Loadable, RepoStore};
-use crate::ui::actions::Action;
-use crate::ui::components::{empty_state, loadable_status, muted_text, primary_button, secondary_button};
+use crate::ui::actions::{Action, PullView};
+use crate::ui::components::{
+    empty_state, loadable_status, muted_text, option_hint, primary_button, secondary_button,
+};
 use crate::ui::dialogs::Dialog;
 use crate::ui::theme;
 
@@ -77,64 +79,223 @@ pub fn pull_detail(ui: &mut Ui, repo: &mut RepoStore, view: &ViewContext<'_>, ac
     let Some(pull) = repo.selected_pull().cloned() else {
         return empty_state(ui, text::SELECT_PULL, "");
     };
-    let busy = view.busy.is_some();
-    egui::ScrollArea::vertical().id_salt(("pull", pull.number)).auto_shrink([false, false]).show(ui, |ui| {
-        ui.heading(&pull.title);
-        ui.label(muted_text(
-            ui,
-            &text::pull_meta(pull.number, &pull.author, &pull.head_branch, &pull.base_branch),
-        ));
-        if pull.draft {
-            ui.label(RichText::new(text::DRAFT).strong());
+    egui::Panel::top(("pull-header", pull.number))
+        .frame(egui::Frame::new().inner_margin(egui::Margin { bottom: PANEL_PADDING, ..Default::default() }))
+        .show(ui, |ui| header(ui, repo, view, &pull, actions));
+    match repo.pull_view {
+        PullView::Conversation => {
+            egui::ScrollArea::vertical()
+                .id_salt(("pull", pull.number))
+                .auto_shrink([false, false])
+                .show(ui, |ui| conversation(ui, repo, &pull, actions));
         }
-        ui.horizontal_wrapped(|ui| {
-            if secondary_button(ui, text::CHECKOUT_PULL, !busy).clicked() {
-                actions.push(Action::CheckoutPull(pull.number));
-            }
-            if secondary_button(ui, text::OPEN_PULL_ON_GITHUB, true).clicked() {
-                actions.push(Action::OpenUrl(pull.url.clone()));
-            }
-        });
-        if let Loadable::Ready(detail) = &repo.pull_detail {
-            checks(ui, detail);
-        }
-        ui.separator();
-        ui.label(muted_text(ui, &text::opened_on(&pull.author, date(&pull.created_at))));
-        let body = if pull.body.trim().is_empty() { text::NO_DESCRIPTION } else { pull.body.as_str() };
-        ui.add(egui::Label::new(body).wrap());
-        ui.add_space(f32::from(PANEL_PADDING));
+        PullView::Files => super::pull_files::files(ui, repo, &pull, actions),
+    }
+}
 
-        ui.label(RichText::new(text::CONVERSATION).strong());
-        match &repo.pull_detail {
-            Loadable::Ready(detail) if detail.comments.is_empty() => {
-                ui.label(muted_text(ui, text::NO_COMMENTS));
-            }
-            Loadable::Ready(detail) => {
-                for comment in &detail.comments {
-                    egui::Frame::group(ui.style()).show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(&comment.author).strong());
-                            ui.label(muted_text(ui, date(&comment.created_at)));
-                        });
-                        ui.add(egui::Label::new(&comment.body).wrap());
-                    });
-                }
-            }
-            other => loadable_status(ui, other),
+/// Title, branches, the buttons, the checks, and the Conversation / Files changed switch.
+fn header(
+    ui: &mut Ui,
+    repo: &RepoStore,
+    view: &ViewContext<'_>,
+    pull: &PullRequest,
+    actions: &mut Vec<Action>,
+) {
+    let busy = view.busy.is_some();
+    let detail = repo.pull_detail.ready();
+    ui.heading(&pull.title);
+    ui.label(muted_text(
+        ui,
+        &text::pull_meta(pull.number, &pull.author, &pull.head_branch, &pull.base_branch),
+    ));
+    if pull.draft {
+        ui.label(RichText::new(text::DRAFT).strong());
+    }
+    ui.horizontal_wrapped(|ui| {
+        if secondary_button(ui, text::CHECKOUT_PULL, !busy).clicked() {
+            actions.push(Action::CheckoutPull(pull.number));
         }
-        ui.add_space(f32::from(PANEL_PADDING));
-        ui.add(
-            egui::TextEdit::multiline(&mut repo.pull_comment)
-                .hint_text(text::COMMENT_HINT)
-                .desired_rows(COMMIT_DESCRIPTION_ROWS)
-                .desired_width(f32::INFINITY),
-        );
-        let ready = !repo.pull_comment.trim().is_empty() && !repo.pull_sending;
-        if primary_button(ui, text::COMMENT_BUTTON, ready).clicked() {
-            actions.push(Action::PostComment { number: pull.number, body: repo.pull_comment.clone() });
+        if secondary_button(ui, text::OPEN_PULL_ON_GITHUB, true).clicked() {
+            actions.push(Action::OpenUrl(pull.url.clone()));
+        }
+        let open = detail.is_some_and(|detail| !detail.mergeability.merged) && !repo.pull_sending;
+        if secondary_button(ui, text::EDIT_PULL, open).clicked() {
+            actions.push(Action::OpenEditPull);
+        }
+        let draft_label = if pull.draft { text::MARK_READY } else { text::CONVERT_TO_DRAFT };
+        if secondary_button(ui, draft_label, open).clicked() {
+            actions.push(Action::SetDraft { number: pull.number, draft: !pull.draft });
         }
     });
+    if let Some(detail) = detail {
+        checks(ui, detail);
+    }
+    ui.horizontal(|ui| {
+        let files =
+            detail.map_or_else(|| text::FILES_CHANGED.to_owned(), |d| text::files_changed(d.files.len()));
+        for (value, label) in
+            [(PullView::Conversation, text::CONVERSATION.to_owned()), (PullView::Files, files)]
+        {
+            let tab = egui::Button::selectable(repo.pull_view == value, label)
+                .min_size(egui::vec2(0.0, MIN_TARGET_SIZE));
+            if ui.add(tab).clicked() && repo.pull_view != value {
+                actions.push(Action::SetPullView(value));
+            }
+        }
+    });
+}
+
+fn conversation(ui: &mut Ui, repo: &mut RepoStore, pull: &PullRequest, actions: &mut Vec<Action>) {
+    ui.label(muted_text(ui, &text::opened_on(&pull.author, date(&pull.created_at))));
+    let body = if pull.body.trim().is_empty() { text::NO_DESCRIPTION } else { pull.body.as_str() };
+    ui.add(egui::Label::new(body).wrap());
+    ui.add_space(f32::from(PANEL_PADDING));
+    let methods = repo.pulls.ready().map(|list| list.merge_methods.clone()).unwrap_or_default();
+    if let Loadable::Ready(detail) = &repo.pull_detail {
+        merge_box(ui, pull, detail, &methods, &mut repo.pull_merge_method, repo.pull_sending, actions);
+        ui.add_space(f32::from(PANEL_PADDING));
+    }
+
+    ui.label(RichText::new(text::CONVERSATION).strong());
+    match &repo.pull_detail {
+        Loadable::Ready(detail) => {
+            let outdated: Vec<_> =
+                detail.review_comments.iter().filter(|comment| comment.line.is_none()).collect();
+            if detail.comments.is_empty() && outdated.is_empty() {
+                ui.label(muted_text(ui, text::NO_COMMENTS));
+            }
+            for comment in &detail.comments {
+                let author = match &comment.verdict {
+                    Some(verdict) => text::review_entry(&comment.author, verdict),
+                    None => comment.author.clone(),
+                };
+                entry(ui, &author, date(&comment.created_at), "", &comment.body);
+            }
+            for comment in outdated {
+                entry(
+                    ui,
+                    &comment.author,
+                    date(&comment.created_at),
+                    &text::outdated_on(&comment.path),
+                    &comment.body,
+                );
+            }
+        }
+        other => loadable_status(ui, other),
+    }
+    ui.add_space(f32::from(PANEL_PADDING));
+    ui.add(
+        egui::TextEdit::multiline(&mut repo.pull_comment)
+            .hint_text(text::COMMENT_HINT)
+            .desired_rows(COMMIT_DESCRIPTION_ROWS)
+            .desired_width(f32::INFINITY),
+    );
+    let ready = !repo.pull_comment.trim().is_empty() && !repo.pull_sending;
+    if primary_button(ui, text::COMMENT_BUTTON, ready).clicked() {
+        actions.push(Action::PostComment { number: pull.number, body: repo.pull_comment.clone() });
+    }
+    ui.add_space(f32::from(PANEL_PADDING));
+    review_box(ui, repo, actions);
+}
+
+/// One comment or review in the conversation.
+fn entry(ui: &mut Ui, author: &str, date: &str, context: &str, body: &str) {
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new(author).strong());
+            ui.label(muted_text(ui, date));
+            if !context.is_empty() {
+                ui.label(muted_text(ui, context));
+            }
+        });
+        if !body.trim().is_empty() {
+            ui.add(egui::Label::new(body).wrap());
+        }
+    });
+}
+
+/// GitHub's merge box: whether it can be merged, the allowed methods and the button.
+fn merge_box(
+    ui: &mut Ui,
+    pull: &PullRequest,
+    detail: &PullDetail,
+    methods: &[MergeMethod],
+    method: &mut MergeMethod,
+    sending: bool,
+    actions: &mut Vec<Action>,
+) {
+    egui::Frame::group(ui.style()).inner_margin(egui::Margin::same(PANEL_PADDING)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        let state = &detail.mergeability;
+        if state.merged {
+            ui.label(RichText::new(text::MERGED).strong());
+            return;
+        }
+        let palette = theme::palette(ui.visuals());
+        let (status, color) = match state.state.as_str() {
+            _ if pull.draft => (text::MERGE_DRAFT, palette.muted_text),
+            _ if state.mergeable.is_none() => (text::MERGE_CHECKING, palette.muted_text),
+            "dirty" => (text::MERGE_CONFLICTS, palette.removed),
+            "blocked" => (text::MERGE_BLOCKED, palette.conflicted),
+            "behind" => (text::MERGE_BEHIND, palette.conflicted),
+            "unstable" => (text::MERGE_UNSTABLE, palette.conflicted),
+            _ => (text::MERGE_CLEAN, palette.added),
+        };
+        ui.add(egui::Label::new(RichText::new(status).color(color)).wrap());
+        if methods.is_empty() {
+            return;
+        }
+        if !methods.contains(method) {
+            *method = methods[0];
+        }
+        ui.horizontal_wrapped(|ui| {
+            for &choice in methods {
+                ui.radio_value(method, choice, merge_label(choice));
+            }
+        });
+        let ready = !pull.draft && state.mergeable != Some(false) && !sending;
+        if primary_button(ui, merge_label(*method), ready).clicked() {
+            actions.push(Action::OpenDialog(Dialog::confirm(
+                merge_label(*method),
+                text::MERGE_PULL_BODY.to_owned(),
+                merge_label(*method),
+                Action::MergePull { number: pull.number, method: *method },
+            )));
+        }
+    });
+}
+
+fn merge_label(method: MergeMethod) -> &'static str {
+    match method {
+        MergeMethod::Merge => text::MERGE_PULL,
+        MergeMethod::Squash => text::MERGE_PULL_SQUASH,
+        MergeMethod::Rebase => text::MERGE_PULL_REBASE,
+    }
+}
+
+/// GitHub's "Review changes": a message and a verdict.
+fn review_box(ui: &mut Ui, repo: &mut RepoStore, actions: &mut Vec<Action>) {
+    ui.label(RichText::new(text::REVIEW_CHANGES).strong());
+    ui.add(
+        egui::TextEdit::multiline(&mut repo.review_body)
+            .hint_text(text::REVIEW_HINT)
+            .desired_rows(COMMIT_DESCRIPTION_ROWS)
+            .desired_width(f32::INFINITY),
+    );
+    for (event, label, hint) in [
+        (ReviewEvent::Comment, text::REVIEW_COMMENT, text::REVIEW_COMMENT_HINT),
+        (ReviewEvent::Approve, text::REVIEW_APPROVE, text::REVIEW_APPROVE_HINT),
+        (ReviewEvent::RequestChanges, text::REVIEW_REQUEST_CHANGES, text::REVIEW_REQUEST_CHANGES_HINT),
+    ] {
+        ui.radio_value(&mut repo.review_event, event, label);
+        option_hint(ui, hint);
+    }
+    let has_body = !repo.review_body.trim().is_empty();
+    let ready = !repo.pull_sending && (has_body || !repo.review_event.needs_body());
+    if primary_button(ui, text::SUBMIT_REVIEW, ready).clicked() {
+        actions.push(Action::SubmitReview);
+    }
 }
 
 fn checks(ui: &mut Ui, detail: &PullDetail) {
@@ -152,6 +313,6 @@ fn checks(ui: &mut Ui, detail: &PullDetail) {
 }
 
 /// `2026-11-24T10:00:00Z` → `2026-11-24`.
-fn date(timestamp: &str) -> &str {
+pub(super) fn date(timestamp: &str) -> &str {
     timestamp.get(..10).unwrap_or(timestamp)
 }

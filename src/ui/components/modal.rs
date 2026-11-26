@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, RichText, Ui};
 
@@ -43,11 +43,11 @@ pub fn folder_picker(ui: &mut Ui, value: &mut String) {
         ui.add(egui::TextEdit::singleline(value).desired_width(ui.available_width() - button_space));
         if secondary_button(ui, text::CHOOSE, !picker_open).clicked() {
             ui.data_mut(|data| data.insert_temp(open_id, true));
-            let start = PathBuf::from(value.as_str());
+            let start = existing_folder(Path::new(value.trim()));
             let ctx = ui.ctx().clone();
             std::thread::spawn(move || {
                 let mut picker = rfd::FileDialog::new();
-                if start.is_dir() {
+                if let Some(start) = start {
                     picker = picker.set_directory(start);
                 }
                 let picked = picker.pick_folder();
@@ -61,4 +61,23 @@ pub fn folder_picker(ui: &mut Ui, value: &mut String) {
             });
         }
     });
+}
+
+/// The folder the picker opens in: the typed one, or the closest folder above it that exists (a
+/// half-typed path, or a repository folder that was moved).
+fn existing_folder(typed: &Path) -> Option<PathBuf> {
+    typed.ancestors().find(|folder| !folder.as_os_str().is_empty() && folder.is_dir()).map(Path::to_path_buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn picker_starts_in_the_closest_existing_folder() {
+        let temp = std::env::temp_dir();
+        assert_eq!(existing_folder(&temp.join("no-such-folder-gde/deeper")), Some(temp.clone()));
+        assert_eq!(existing_folder(&temp), Some(temp));
+        assert_eq!(existing_folder(Path::new("")), None);
+    }
 }

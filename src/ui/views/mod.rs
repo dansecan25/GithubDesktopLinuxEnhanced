@@ -2,6 +2,7 @@ mod changes;
 mod conflict;
 mod context_menus;
 mod history;
+mod pull_files;
 mod pulls;
 mod toolbar;
 mod update_banner;

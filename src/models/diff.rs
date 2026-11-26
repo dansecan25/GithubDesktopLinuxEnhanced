@@ -20,6 +20,8 @@ pub struct DiffLine {
     pub text: String,
     pub old_number: Option<u32>,
     pub new_number: Option<u32>,
+    /// The line ended in `\r\n`. `text` never holds the `\r`; a partial commit puts it back.
+    pub crlf: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -160,7 +162,7 @@ mod tests {
     use super::*;
 
     fn line(kind: DiffLineKind) -> DiffLine {
-        DiffLine { kind, text: String::new(), old_number: None, new_number: None }
+        DiffLine { kind, text: String::new(), old_number: None, new_number: None, crlf: false }
     }
 
     fn two_hunks() -> Diff {

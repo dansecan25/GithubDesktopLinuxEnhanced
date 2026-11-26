@@ -24,6 +24,7 @@ use crate::constants::text;
 use crate::git::control::OperationControl;
 use crate::services::askpass::{AskpassRequest, AskpassServer, GitHubAccount, SharedAccount};
 use crate::services::editor::{self, Editor};
+use crate::services::graphics::FrameLimiter;
 use crate::services::secrets;
 use crate::services::settings::{self, Settings};
 use crate::services::tasks::{TaskOutput, Tasks};
@@ -71,12 +72,21 @@ pub struct DesktopApp {
     /// Window geometry as last written to disk, and when it was written (seconds since start).
     saved_window: WindowGeometry,
     last_window_save: f64,
+    frame_limiter: FrameLimiter,
 }
 
 impl DesktopApp {
     pub fn new(cc: &eframe::CreationContext<'_>, settings: Settings) -> Self {
         theme::install_fonts(&cc.egui_ctx);
         theme::apply(&cc.egui_ctx, settings.theme);
+        watchdog::attach(&cc.egui_ctx);
+        if let Some(render) = cc.wgpu_render_state.as_ref() {
+            let info = render.adapter.get_info();
+            watchdog::set_graphics(format!(
+                "{} ({:?}, {:?}, driver {} {})",
+                info.name, info.device_type, info.backend, info.driver, info.driver_info
+            ));
+        }
         let account: SharedAccount = Arc::new(Mutex::new(None));
         let (askpass, askpass_error) = match AskpassServer::start(cc.egui_ctx.clone(), Arc::clone(&account)) {
             Ok(server) => (Some(server), None),
@@ -108,6 +118,7 @@ impl DesktopApp {
             checked_monitor_fit: false,
             saved_window,
             last_window_save: 0.0,
+            frame_limiter: FrameLimiter::default(),
         };
         if let Some(login) = login {
             app.tasks.spawn(move || {
@@ -171,6 +182,7 @@ impl DesktopApp {
 impl eframe::App for DesktopApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.frame_limiter.wait();
         watchdog::frame_started();
         for output in self.tasks.finished() {
             watchdog::set_activity(output.name());

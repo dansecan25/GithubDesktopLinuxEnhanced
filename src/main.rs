@@ -3,7 +3,7 @@ use eframe::egui;
 use github_desktop_enhanced::app::{DesktopApp, initial_window};
 use github_desktop_enhanced::constants::app::{APP_ID, APP_NAME, RESET_WINDOW_FLAG, VERSION, VERSION_FLAG};
 use github_desktop_enhanced::constants::layout::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH};
-use github_desktop_enhanced::services::{askpass, memory_cap, settings, watchdog};
+use github_desktop_enhanced::services::{askpass, graphics, memory_cap, settings, watchdog};
 
 fn main() -> eframe::Result {
     // Git starts this executable as its credential helper: answer and exit, no window.
@@ -31,6 +31,7 @@ fn main() -> eframe::Result {
         viewport,
         // The app saves its own, validated window size. See `services/window_state.rs`.
         persist_window: false,
+        wgpu_options: graphics::wgpu_options(),
         ..Default::default()
     };
     eframe::run_native(APP_NAME, options, Box::new(|cc| Ok(Box::new(DesktopApp::new(cc, settings)))))

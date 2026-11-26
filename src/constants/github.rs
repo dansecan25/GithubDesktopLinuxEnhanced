@@ -33,3 +33,7 @@ pub const DEVICE_SLOW_DOWN: Duration = Duration::from_secs(5);
 
 /// Open pull requests listed at most (GitHub's largest page).
 pub const MAX_PULLS: u32 = 100;
+/// Items per page when reading every page of a list (GitHub's largest page).
+pub const PER_PAGE: u32 = 100;
+/// Pages read at most per list: 3,000 files, which is all GitHub returns for a pull request.
+pub const MAX_PULL_PAGES: u32 = 30;

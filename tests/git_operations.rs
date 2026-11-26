@@ -5,9 +5,9 @@ use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use github_desktop_enhanced::git::{
-    branches, changes, conflicts, history, merge, partial, remote, repository, stash, tags,
+    branches, changes, commits, conflicts, history, merge, partial, rebase, remote, repository, stash, tags,
 };
-use github_desktop_enhanced::models::{ChangeKind, ConflictChoice, FileChange, LineSelection};
+use github_desktop_enhanced::models::{ChangeKind, ConflictChoice, FileChange, InProgress, LineSelection};
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -348,6 +348,7 @@ fn branch(name: &str) -> github_desktop_enhanced::models::Branch {
         is_remote: false,
         is_current: false,
         upstream: None,
+        committed: None,
     }
 }
 
@@ -487,7 +488,7 @@ fn commits_only_the_chosen_lines() {
 
     let partial_file = pick(&repo, "f.txt", &["-line 19", "+line nineteen"]);
     let chosen = repo.changes();
-    partial::commit_with_lines(&repo.0, "first hunk only", &chosen, &[partial_file], true).unwrap();
+    partial::commit_with_lines(&repo.0, "first hunk only", &chosen, &[partial_file], true, false).unwrap();
 
     assert_eq!(head_content(&repo, "f.txt"), original.replace("line 2\n", "line two\n"));
     assert_eq!(head_content(&repo, "other.txt"), "other changed\n");
@@ -506,7 +507,7 @@ fn leaving_out_a_removal_keeps_the_old_line() {
     git(&repo.0, &["commit", "-m", "first"]);
     repo.write("f.txt", "keep\nnew\n");
     let partial_file = pick(&repo, "f.txt", &["-old"]);
-    partial::commit_with_lines(&repo.0, "add new", &repo.changes(), &[partial_file], true).unwrap();
+    partial::commit_with_lines(&repo.0, "add new", &repo.changes(), &[partial_file], true, false).unwrap();
     assert_eq!(head_content(&repo, "f.txt"), "keep\nold\nnew\n");
 }
 
@@ -518,7 +519,8 @@ fn new_files_can_be_committed_in_part() {
     git(&repo.0, &["commit", "-m", "first"]);
     repo.write("new.txt", "a\nb\nc");
     let partial_file = pick(&repo, "new.txt", &["+b"]);
-    partial::commit_with_lines(&repo.0, "part of new", &repo.changes(), &[partial_file], true).unwrap();
+    partial::commit_with_lines(&repo.0, "part of new", &repo.changes(), &[partial_file], true, false)
+        .unwrap();
     assert_eq!(head_content(&repo, "new.txt"), "a\nc");
 }
 
@@ -531,8 +533,8 @@ fn a_file_changed_after_picking_lines_is_not_committed() {
     repo.write("f.txt", "A\nB\n");
     let partial_file = pick(&repo, "f.txt", &["-b", "+B"]);
     repo.write("f.txt", "A\nB\nC\n");
-    let error =
-        partial::commit_with_lines(&repo.0, "stale", &repo.changes(), &[partial_file], true).unwrap_err();
+    let error = partial::commit_with_lines(&repo.0, "stale", &repo.changes(), &[partial_file], true, false)
+        .unwrap_err();
     assert!(error.message.contains("changed after you picked"), "{}", error.message);
     assert_eq!(head_content(&repo, "f.txt"), "a\nb\n");
 }
@@ -693,4 +695,272 @@ fn project_versions_come_from_the_tagged_commit() {
     assert_eq!(found, [("free_music_player/pubspec.yaml", "1.0.0")]);
     let head = tags::project_versions(&repo.0, "HEAD").unwrap();
     assert_eq!(head[0].version, "1.1.0");
+}
+
+#[test]
+fn undo_keeps_the_changes_and_returns_the_message() {
+    let repo = TempRepo::new();
+    repo.write("a.txt", "1\n");
+    changes::commit(&repo.0, "Initial", &repo.changes(), true).unwrap();
+    repo.write("a.txt", "2\n");
+    repo.write("b.txt", "new\n");
+    changes::commit(&repo.0, "Second\n\nWhy", &repo.changes(), true).unwrap();
+
+    assert_eq!(commits::undo_last(&repo.0).unwrap(), "Second\n\nWhy");
+    assert_eq!(history::log(&repo.0).unwrap().len(), 1);
+    let left = repo.changes();
+    assert_eq!(left.len(), 2, "{left:?}");
+    assert_eq!(std::fs::read_to_string(repo.0.join("a.txt")).unwrap(), "2\n");
+
+    // Undoing the first commit leaves a repository without commits, its files still there.
+    changes::commit(&repo.0, "Again", &repo.changes(), true).unwrap();
+    git(&repo.0, &["reset", "--hard", "HEAD~1"]);
+    commits::undo_last(&repo.0).unwrap();
+    let snapshot = repository::load_snapshot(&repo.0).unwrap();
+    assert!(!snapshot.status.has_commits);
+    assert_eq!(snapshot.changes.len(), 1);
+}
+
+#[test]
+fn amend_replaces_the_last_commit() {
+    let repo = TempRepo::new();
+    repo.write("a.txt", "1\n");
+    changes::commit(&repo.0, "Initial", &repo.changes(), true).unwrap();
+    repo.write("b.txt", "b\n");
+    repo.write("c.txt", "c\n");
+    changes::commit(&repo.0, "Add b", &[find(&repo.changes(), "b.txt").clone()], false).unwrap();
+
+    // Only the message.
+    changes::amend(&repo.0, "Add b, reworded", &[], false).unwrap();
+    let log = history::log(&repo.0).unwrap();
+    assert_eq!((log.len(), log[0].summary.as_str()), (2, "Add b, reworded"));
+    assert_eq!(repo.changes().len(), 1, "c.txt is still uncommitted");
+
+    // With another file.
+    changes::amend(&repo.0, "Add b and c", &repo.changes(), true).unwrap();
+    let log = history::log(&repo.0).unwrap();
+    assert_eq!(log.len(), 2);
+    assert_eq!(history::commit_files(&repo.0, &log[0].sha).unwrap().len(), 2);
+    assert!(repo.changes().is_empty());
+}
+
+#[test]
+fn rewriting_a_pushed_commit_needs_a_force_push() {
+    let origin = bare_remote();
+    let repo = TempRepo::new();
+    repo.write("a.txt", "1\n");
+    changes::commit(&repo.0, "Initial", &repo.changes(), true).unwrap();
+    remote::add(&repo.0, "origin", &origin.0.to_string_lossy()).unwrap();
+    let snapshot = repository::load_snapshot(&repo.0).unwrap();
+    assert!(!snapshot.head_pushed);
+    remote::push(&repo.0, &snapshot.status, Some("origin")).unwrap();
+    let snapshot = repository::load_snapshot(&repo.0).unwrap();
+    assert!(snapshot.head_pushed);
+    assert_eq!(snapshot.status.head_sha.as_deref(), Some(git(&repo.0, &["rev-parse", "HEAD"]).trim()));
+
+    changes::amend(&repo.0, "Initial, reworded", &[], false).unwrap();
+    let snapshot = repository::load_snapshot(&repo.0).unwrap();
+    assert!(!snapshot.head_pushed);
+    assert_eq!((snapshot.status.ahead, snapshot.status.behind), (1, 1));
+    assert!(remote::push(&repo.0, &snapshot.status, Some("origin")).is_err());
+    remote::force_push(&repo.0).unwrap();
+    assert!(git(&origin.0, &["log", "-1", "--format=%s", "main"]).contains("reworded"));
+}
+
+#[test]
+fn renamed_files_can_be_committed_in_part() {
+    let repo = TempRepo::new();
+    let original: String = (1..=10).map(|n| format!("line {n}\n")).collect();
+    repo.write("old.txt", &original);
+    git(&repo.0, &["add", "."]);
+    git(&repo.0, &["commit", "-m", "first"]);
+    git(&repo.0, &["mv", "old.txt", "new.txt"]);
+    let edited = original.replace("line 1\n", "line one\n").replace("line 10\n", "line ten\n");
+    repo.write("new.txt", &edited);
+    assert_eq!(find(&repo.changes(), "new.txt").kind, ChangeKind::Renamed);
+
+    let partial_file = pick(&repo, "new.txt", &["-line 10", "+line ten"]);
+    partial::commit_with_lines(&repo.0, "move", &repo.changes(), &[partial_file], true, false).unwrap();
+    // The file moved with only the chosen change.
+    assert_eq!(head_content(&repo, "new.txt"), original.replace("line 1\n", "line one\n"));
+    assert!(git(&repo.0, &["ls-tree", "--name-only", "HEAD"]).lines().all(|name| name != "old.txt"));
+    let left = repo.changes();
+    assert_eq!((left.len(), left[0].path.as_str(), left[0].kind), (1, "new.txt", ChangeKind::Modified));
+}
+
+#[test]
+fn deleted_files_can_be_committed_in_part() {
+    let repo = TempRepo::new();
+    repo.write("d.txt", "a\nb\nc\n");
+    git(&repo.0, &["add", "."]);
+    git(&repo.0, &["commit", "-m", "first"]);
+    std::fs::remove_file(repo.0.join("d.txt")).unwrap();
+    let partial_file = pick(&repo, "d.txt", &["-b"]);
+    partial::commit_with_lines(&repo.0, "remove some", &repo.changes(), &[partial_file], true, false)
+        .unwrap();
+    assert_eq!(head_content(&repo, "d.txt"), "b\n");
+    assert_eq!(find(&repo.changes(), "d.txt").kind, ChangeKind::Deleted);
+}
+
+#[test]
+fn crlf_files_can_be_committed_in_part() {
+    let repo = TempRepo::new();
+    repo.write("w.txt", "one\r\ntwo\r\nthree\r\n");
+    git(&repo.0, &["add", "."]);
+    git(&repo.0, &["commit", "-m", "first"]);
+    repo.write("w.txt", "ONE\r\ntwo\r\nTHREE\r\n");
+    let partial_file = pick(&repo, "w.txt", &["-three", "+THREE"]);
+    partial::commit_with_lines(&repo.0, "crlf", &repo.changes(), &[partial_file], true, false).unwrap();
+    assert_eq!(head_content(&repo, "w.txt"), "ONE\r\ntwo\r\nthree\r\n");
+
+    // A new CRLF file follows core.autocrlf, as `git add` would.
+    git(&repo.0, &["config", "core.autocrlf", "input"]);
+    repo.write("n.txt", "a\r\nb\r\nc\r\n");
+    let partial_file = pick(&repo, "n.txt", &["+b"]);
+    partial::commit_with_lines(&repo.0, "new crlf", &repo.changes(), &[partial_file], true, false).unwrap();
+    assert_eq!(head_content(&repo, "n.txt"), "a\nc\n");
+}
+
+fn parents(repo: &TempRepo, rev: &str) -> usize {
+    git(&repo.0, &["rev-list", "--parents", "-n", "1", rev]).split_whitespace().count() - 1
+}
+
+#[test]
+fn squash_merge_makes_one_ordinary_commit() {
+    let repo = repo_with_feature_branch();
+    git(&repo.0, &["switch", "feature"]);
+    repo.write("more.txt", "more\n");
+    git(&repo.0, &["add", "."]);
+    git(&repo.0, &["commit", "-m", "second feature change"]);
+    git(&repo.0, &["switch", "main"]);
+
+    merge::squash(&repo.0, "feature", "main").unwrap();
+    let log = history::log(&repo.0).unwrap();
+    assert_eq!(log.len(), 2);
+    assert_eq!(log[0].summary, "Squash merge branch 'feature' into main");
+    assert_eq!(log[0].body, "* feature change\n* second feature change");
+    assert_eq!(parents(&repo, "HEAD"), 1);
+    assert!(repo.changes().is_empty());
+    assert!(repository::load_snapshot(&repo.0).unwrap().in_progress().is_none());
+}
+
+#[test]
+fn conflicting_squash_waits_for_a_commit_or_abort() {
+    let repo = repo_with_feature_branch();
+    repo.write("shared.txt", "one from main\n");
+    git(&repo.0, &["commit", "-am", "main change"]);
+
+    let error = merge::squash(&repo.0, "feature", "main").unwrap_err();
+    assert!(error.message.contains("conflicts"), "{}", error.message);
+    let snapshot = repository::load_snapshot(&repo.0).unwrap();
+    assert_eq!(snapshot.in_progress(), Some(InProgress::Squash));
+    assert!(snapshot.squash_message.unwrap().starts_with("Squash merge branch 'feature'"));
+
+    merge::abort_squash(&repo.0).unwrap();
+    let snapshot = repository::load_snapshot(&repo.0).unwrap();
+    assert!(snapshot.in_progress().is_none());
+    assert!(snapshot.changes.is_empty());
+
+    // Resolved and committed: git removes the prepared message.
+    let _ = merge::squash(&repo.0, "feature", "main");
+    conflicts::take_side(&repo.0, "shared.txt", false).unwrap();
+    changes::commit(&repo.0, "Squashed", &repo.changes(), true).unwrap();
+    assert!(repository::load_snapshot(&repo.0).unwrap().in_progress().is_none());
+    assert_eq!(parents(&repo, "HEAD"), 1);
+}
+
+#[test]
+fn rebase_replays_commits_and_stops_on_conflicts() {
+    let repo = repo_with_feature_branch();
+    // main gets a change that doesn't conflict: feature is rebased cleanly onto it.
+    repo.write("main.txt", "main\n");
+    git(&repo.0, &["add", "."]);
+    git(&repo.0, &["commit", "-m", "main file"]);
+    git(&repo.0, &["switch", "feature"]);
+    let preview = merge::preview(&repo.0, "main").unwrap();
+    assert_eq!((preview.commits, preview.ahead), (1, 1));
+    repo.write("dirty.txt", "x\n");
+    git(&repo.0, &["add", "dirty.txt"]);
+    assert!(rebase::rebase(&repo.0, "main").is_err(), "uncommitted changes stop a rebase");
+    git(&repo.0, &["rm", "-q", "--cached", "dirty.txt"]);
+    std::fs::remove_file(repo.0.join("dirty.txt")).unwrap();
+
+    rebase::rebase(&repo.0, "main").unwrap();
+    let log = history::log(&repo.0).unwrap();
+    assert_eq!(
+        log.iter().map(|c| c.summary.as_str()).collect::<Vec<_>>(),
+        ["feature change", "main file", "first"]
+    );
+
+    // Now a conflicting change on main.
+    git(&repo.0, &["switch", "main"]);
+    repo.write("shared.txt", "one from main\n");
+    git(&repo.0, &["commit", "-am", "main change"]);
+    git(&repo.0, &["switch", "feature"]);
+    let error = rebase::rebase(&repo.0, "main").unwrap_err();
+    assert!(error.message.contains("stopped"), "{}", error.message);
+    let snapshot = repository::load_snapshot(&repo.0).unwrap();
+    let Some(InProgress::Rebase(state)) = snapshot.in_progress() else { panic!("no rebase: {snapshot:?}") };
+    assert_eq!(
+        (state.branch.as_str(), state.onto.as_str(), state.step, state.total),
+        ("feature", "main", 1, 1)
+    );
+    assert!(rebase::continue_rebase(&repo.0).is_err(), "conflicts are still there");
+
+    // Abort goes back to feature as it was.
+    rebase::abort(&repo.0).unwrap();
+    assert!(repository::load_snapshot(&repo.0).unwrap().in_progress().is_none());
+    assert_eq!(std::fs::read_to_string(repo.0.join("shared.txt")).unwrap(), "one from feature\n");
+
+    // Resolving with main's side makes the commit empty: continuing skips it.
+    let _ = rebase::rebase(&repo.0, "main");
+    conflicts::take_side(&repo.0, "shared.txt", true).unwrap();
+    rebase::continue_rebase(&repo.0).unwrap();
+    let snapshot = repository::load_snapshot(&repo.0).unwrap();
+    assert!(snapshot.in_progress().is_none());
+    assert_eq!(snapshot.status.head.as_deref(), Some("feature"));
+    assert_eq!(history::log(&repo.0).unwrap()[0].summary, "main change");
+}
+
+#[test]
+fn rebase_continues_after_a_real_resolution() {
+    let repo = repo_with_feature_branch();
+    repo.write("shared.txt", "one from main\n");
+    git(&repo.0, &["commit", "-am", "main change"]);
+    git(&repo.0, &["switch", "feature"]);
+    let _ = rebase::rebase(&repo.0, "main");
+    repo.write("shared.txt", "one from both\n");
+    conflicts::mark_resolved(&repo.0, "shared.txt").unwrap();
+    rebase::continue_rebase(&repo.0).unwrap();
+    let log = history::log(&repo.0).unwrap();
+    assert_eq!(log[0].summary, "feature change");
+    assert_eq!(log[1].summary, "main change");
+    assert_eq!(head_content(&repo, "shared.txt"), "one from both\n");
+}
+
+#[test]
+fn branches_are_listed_newest_commit_first() {
+    let repo = TempRepo::new();
+    let commit_at = |message: &str, date: &str| {
+        let output = Command::new("git")
+            .current_dir(&repo.0)
+            .args(["commit", "--allow-empty", "-m", message])
+            .env("GIT_COMMITTER_DATE", date)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    };
+    commit_at("first", "2020-01-01T00:00:00Z");
+    git(&repo.0, &["branch", "old"]);
+    git(&repo.0, &["switch", "-c", "newest"]);
+    commit_at("newest work", "2024-01-01T00:00:00Z");
+    git(&repo.0, &["switch", "-c", "middle", "main"]);
+    commit_at("middle work", "2022-01-01T00:00:00Z");
+
+    let listed = branches::list(&repo.0).unwrap();
+    let names: Vec<&str> = listed.iter().map(|branch| branch.name.as_str()).collect();
+    assert_eq!(names[..2], ["newest", "middle"]);
+    let newest = &listed[0];
+    assert_eq!(newest.committed, Some(1_704_067_200));
+    assert!(listed.iter().all(|branch| branch.committed.is_some()));
 }

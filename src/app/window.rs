@@ -5,6 +5,7 @@ use eframe::egui;
 use super::DesktopApp;
 use crate::constants::app::WINDOW_SAVE_DELAY_SECONDS;
 use crate::services::settings::{self, Settings};
+use crate::services::watchdog;
 use crate::services::window_state::{self, WindowGeometry, WindowObservation};
 use crate::ui::actions::{Action, Tab};
 use crate::ui::dialogs::Dialog;
@@ -95,6 +96,7 @@ impl DesktopApp {
         }
 
         let focused = observation.focused.unwrap_or(true);
+        watchdog::set_focused(focused);
         if focused && !self.was_focused && self.repo.is_some() {
             actions.push(Action::Refresh);
         }

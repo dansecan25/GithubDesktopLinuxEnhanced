@@ -3,12 +3,14 @@
 
 pub mod branches;
 pub mod changes;
+pub mod commits;
 pub mod conflicts;
 pub mod control;
 pub mod history;
 pub mod merge;
 pub mod parse;
 pub mod partial;
+pub mod rebase;
 pub mod remote;
 pub mod repository;
 pub mod runner;

@@ -17,6 +17,7 @@ use eframe::egui::Context;
 
 use crate::constants::app::{APP_ID, VERSION};
 use crate::constants::github::{APP_REPOSITORY, DOWNLOAD_TIMEOUT, MAX_PACKAGE_BYTES, UPDATE_CHECK_INTERVAL};
+use crate::constants::text;
 use crate::github;
 use crate::utils::version::is_newer;
 
@@ -83,7 +84,9 @@ fn download(url: &str, to: &Path) -> Result<(), String> {
 
 /// Downloads and unpacks the latest release if it is newer than `current`.
 fn fetch_update(current: &str, report: &dyn Fn(Status)) -> Result<Option<Update>, String> {
-    let release = github::latest_release(APP_REPOSITORY)?;
+    // GitHub answers "Not Found" when nothing is published yet (only drafts or pre-releases).
+    let release = github::latest_release(APP_REPOSITORY)
+        .map_err(|error| if error == "Not Found" { text::NO_PUBLISHED_RELEASE.to_owned() } else { error })?;
     let version = release.tag_name.trim_start_matches('v').to_owned();
     if !is_newer(&version, current) {
         return Ok(None);

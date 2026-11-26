@@ -228,12 +228,20 @@ fn dialogs_and_menus(harness: &mut Harness<'_, DesktopApp>, repo: &Path) {
     settle(harness);
     click_row(harness, "Current branch");
     settle(harness);
-    // The branch row is labelled exactly "main" (the file row "main.rs" starts the same way).
+    // The branch row is labelled "main" plus its last commit time ("main just now"). The file row
+    // "main.rs" starts the same way, so the first word must be exactly "main".
     harness
         .get_all_by_role(egui::accesskit::Role::Button)
-        .find(|node| node.accesskit_node().label().as_deref() == Some("main"))
+        .find(|node| {
+            node.accesskit_node().label().is_some_and(|label| label.split_whitespace().next() == Some("main"))
+        })
         .expect("branch row")
         .click_secondary();
+    // Each branch shows how long ago its last commit was, as in GitHub Desktop.
+    assert!(
+        harness.query_by_label_contains("ago").is_some()
+            || harness.query_by_label_contains("just now").is_some()
+    );
     settle(harness);
     save(harness, "menu-branch");
     harness.key_press(egui::Key::Escape);
@@ -267,6 +275,15 @@ fn dialogs_and_menus(harness: &mut Harness<'_, DesktopApp>, repo: &Path) {
         "merge preview text"
     );
     save(harness, "dialog-merge");
+    harness.get_by_label("Squash and merge").click();
+    settle(harness);
+    assert!(harness.query_by_label("Squash and merge feature into main").is_some(), "squash button");
+    save(harness, "dialog-merge-squash");
+    harness.get_by_label("Rebase").click();
+    settle(harness);
+    // The demo repository has uncommitted changes, which a rebase refuses.
+    assert!(harness.query_by_label_contains("Commit or stash your changes before rebasing").is_some());
+    save(harness, "dialog-merge-rebase");
     harness.key_press(egui::Key::Escape);
     settle(harness);
 
@@ -275,7 +292,11 @@ fn dialogs_and_menus(harness: &mut Harness<'_, DesktopApp>, repo: &Path) {
     settle(harness);
     harness
         .get_all_by_role(egui::accesskit::Role::Button)
-        .find(|node| node.accesskit_node().label().as_deref() == Some("feature"))
+        .find(|node| {
+            node.accesskit_node()
+                .label()
+                .is_some_and(|label| label.split_whitespace().next() == Some("feature"))
+        })
         .expect("feature row in the branch menu")
         .click();
     settle(harness);
@@ -383,6 +404,7 @@ fn renders_main_screens() {
         }
     }
     conflict_editor(&root);
+    amend_and_rebase(&root);
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -419,4 +441,55 @@ fn conflict_editor(root: &Path) {
     settle(&mut harness);
     assert!(harness.query_by_label("Mark as resolved").is_some(), "resolved file");
     save(&mut harness, "conflict-resolved");
+}
+
+fn open(repo: &Path) -> Harness<'static, DesktopApp> {
+    let settings = Settings {
+        repositories: vec![repo.to_path_buf()],
+        selected_repository: Some(repo.to_path_buf()),
+        theme: ThemeChoice::Dark,
+        ..Settings::default()
+    };
+    let mut harness = Harness::builder().with_size(WIDE).build_eframe(|cc| DesktopApp::new(cc, settings));
+    settle(&mut harness);
+    harness
+}
+
+/// Undoing and amending the last commit, then a rebase stopped on a conflict.
+fn amend_and_rebase(root: &Path) {
+    let repo = root.join("rebase-project");
+    std::fs::create_dir_all(&repo).unwrap();
+    git(&repo, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo.join("config.toml"), "[server]\nport = 8080\n").unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "Add config"]);
+    git(&repo, &["switch", "-q", "-c", "feature"]);
+    std::fs::write(repo.join("config.toml"), "[server]\nport = 9090\n").unwrap();
+    git(&repo, &["commit", "-q", "-am", "Use port 9090", "-m", "Co-authored-by: Ana <ana@example.com>"]);
+    git(&repo, &["switch", "-q", "main"]);
+    std::fs::write(repo.join("config.toml"), "[server]\nport = 3000\n").unwrap();
+    git(&repo, &["commit", "-q", "-am", "Use port 3000"]);
+    git(&repo, &["switch", "-q", "feature"]);
+
+    let mut harness = open(&repo);
+    assert!(harness.query_by_label_contains("Last commit: Use port 9090").is_some(), "undo row");
+    save(&mut harness, "undo-commit");
+    harness.get_by_label("History").click();
+    settle(&mut harness);
+    right_click_row(&harness, "Use port 9090");
+    settle(&mut harness);
+    harness.get_by_label("Amend commit…").click();
+    settle(&mut harness);
+    assert!(harness.query_by_label("Amend last commit").is_some(), "amend button");
+    assert!(harness.query_by_label_contains("Ana ×").is_some(), "co-author kept");
+    save(&mut harness, "amend-commit");
+    drop(harness);
+
+    let _ = Command::new("git").current_dir(&repo).args(["rebase", "main"]).output();
+    let mut harness = open(&repo);
+    click_row(&harness, "config.toml");
+    settle(&mut harness);
+    assert!(harness.query_by_label_contains("Rebasing feature onto main (commit 1 of 1)").is_some());
+    assert!(harness.query_by_label("Continue rebase").is_some(), "continue button");
+    save(&mut harness, "rebase-in-progress");
 }

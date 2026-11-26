@@ -2,11 +2,11 @@ use eframe::egui::{self, RichText, Ui};
 
 use crate::constants::layout::{COMMIT_DESCRIPTION_ROWS, MAX_CO_AUTHOR_SUGGESTIONS, PANEL_PADDING};
 use crate::constants::text;
-use crate::models::{ChangeKind, CoAuthor, FileChange};
+use crate::models::{ChangeKind, CoAuthor, FileChange, InProgress};
 use crate::stores::{Loadable, RepoStore};
 use crate::ui::actions::Action;
 use crate::ui::components::{
-    LinePicker, diff_view, empty_state, file_row, left_clicked, loadable_status, primary_button,
+    LinePicker, diff_view, empty_state, file_row, left_clicked, loadable_status, muted_text, primary_button,
     right_click_menu, rounded, secondary_button,
 };
 use crate::ui::dialogs::Dialog;
@@ -29,25 +29,20 @@ pub fn changes_list(ui: &mut Ui, repo: &mut RepoStore, view: &ViewContext<'_>, a
         .collect();
     let has_stashes = !stashes.is_empty();
 
-    if snapshot.merge_message.is_some() {
+    let in_progress = snapshot.in_progress();
+    let unresolved = snapshot.changes.iter().any(|change| change.kind == ChangeKind::Conflicted);
+    if let Some(in_progress) = &in_progress {
         egui::Panel::top("merge-in-progress")
             .frame(egui::Frame::new().inner_margin(egui::Margin::same(PANEL_PADDING)))
-            .show(ui, |ui| {
-                ui.add(egui::Label::new(RichText::new(text::MERGE_IN_PROGRESS).strong()).wrap());
-                if secondary_button(ui, text::ABORT_MERGE, !busy).clicked() {
-                    actions.push(Action::OpenDialog(Dialog::confirm(
-                        text::ABORT_MERGE,
-                        text::ABORT_MERGE_BODY.to_owned(),
-                        text::ABORT_MERGE,
-                        Action::AbortMerge,
-                    )));
-                }
-            });
+            .show(ui, |ui| in_progress_banner(ui, in_progress, busy, unresolved, actions));
     }
 
-    egui::Panel::bottom("commit-form")
-        .frame(egui::Frame::new().inner_margin(egui::Margin::same(PANEL_PADDING)))
-        .show(ui, |ui| commit_form(ui, repo, &branch, busy, actions));
+    // A stopped rebase is finished by continuing it, not by committing.
+    if !matches!(in_progress, Some(InProgress::Rebase(_))) {
+        egui::Panel::bottom("commit-form")
+            .frame(egui::Frame::new().inner_margin(egui::Margin::same(PANEL_PADDING)))
+            .show(ui, |ui| commit_form(ui, repo, &branch, busy, actions));
+    }
 
     if has_stashes {
         egui::Panel::bottom("stashes")
@@ -81,6 +76,44 @@ pub fn changes_list(ui: &mut Ui, repo: &mut RepoStore, view: &ViewContext<'_>, a
     }
 
     egui::CentralPanel::no_frame().show(ui, |ui| file_list(ui, repo, view, actions));
+}
+
+/// What is waiting to be finished, with the buttons to finish or abort it.
+fn in_progress_banner(
+    ui: &mut Ui,
+    in_progress: &InProgress,
+    busy: bool,
+    unresolved: bool,
+    actions: &mut Vec<Action>,
+) {
+    let abort = |title: &str, body: &str, action: Action| {
+        Action::OpenDialog(Dialog::confirm(title, body.to_owned(), title, action))
+    };
+    match in_progress {
+        InProgress::Merge | InProgress::Squash => {
+            let (message, body) = if *in_progress == InProgress::Merge {
+                (text::MERGE_IN_PROGRESS, text::ABORT_MERGE_BODY)
+            } else {
+                (text::SQUASH_IN_PROGRESS, text::ABORT_SQUASH_BODY)
+            };
+            ui.add(egui::Label::new(RichText::new(message).strong()).wrap());
+            if secondary_button(ui, text::ABORT_MERGE, !busy).clicked() {
+                actions.push(abort(text::ABORT_MERGE, body, Action::AbortMerge));
+            }
+        }
+        InProgress::Rebase(rebase) => {
+            let message = text::rebase_in_progress(&rebase.branch, &rebase.onto, rebase.step, rebase.total);
+            ui.add(egui::Label::new(RichText::new(message).strong()).wrap());
+            ui.horizontal_wrapped(|ui| {
+                if primary_button(ui, text::CONTINUE_REBASE, !busy && !unresolved).clicked() {
+                    actions.push(Action::ContinueRebase);
+                }
+                if secondary_button(ui, text::ABORT_REBASE, !busy).clicked() {
+                    actions.push(abort(text::ABORT_REBASE, text::ABORT_REBASE_BODY, Action::AbortRebase));
+                }
+            });
+        }
+    }
 }
 
 fn file_list(ui: &mut Ui, repo: &mut RepoStore, view: &ViewContext<'_>, actions: &mut Vec<Action>) {
@@ -133,6 +166,13 @@ fn file_list(ui: &mut Ui, repo: &mut RepoStore, view: &ViewContext<'_>, actions:
 }
 
 fn commit_form(ui: &mut Ui, repo: &mut RepoStore, branch: &str, busy: bool, actions: &mut Vec<Action>) {
+    let merging = repo.snapshot.ready().is_some_and(|snapshot| snapshot.is_busy_merging());
+    if let Some(summary) = repo.amending.is_some().then(|| repo.history.ready()?.first()).flatten() {
+        ui.add(egui::Label::new(RichText::new(text::amending(&summary.summary)).strong()).wrap());
+        if secondary_button(ui, text::CANCEL_AMEND, !busy).clicked() {
+            actions.push(Action::CancelAmend);
+        }
+    }
     ui.add(
         egui::TextEdit::singleline(&mut repo.commit_summary)
             .hint_text(text::SUMMARY_HINT)
@@ -146,20 +186,54 @@ fn commit_form(ui: &mut Ui, repo: &mut RepoStore, branch: &str, busy: bool, acti
     );
     co_authors(ui, repo);
     let can_commit = can_commit(repo) && !busy;
-    let label = text::commit_button(branch);
+    let label =
+        if repo.amending.is_some() { text::AMEND_BUTTON.to_owned() } else { text::commit_button(branch) };
     ui.scope(|ui| {
         ui.set_width(ui.available_width());
         if primary_button(ui, &label, can_commit).clicked() {
             actions.push(Action::Commit);
         }
     });
+    last_commit(ui, repo, busy || merging, actions);
 }
 
-/// Lines can be picked in modified and new files, but not during a merge (git commits a merge
-/// whole) or in renames, deletions and conflicts.
+/// GitHub Desktop's "Committed … · Undo" line, for a last commit that isn't pushed yet. A pushed
+/// commit can still be undone from the History tab, after a warning.
+fn last_commit(ui: &mut Ui, repo: &RepoStore, disabled: bool, actions: &mut Vec<Action>) {
+    let Some(snapshot) = repo.snapshot.ready() else { return };
+    if snapshot.head_pushed || repo.amending.is_some() {
+        return;
+    }
+    let Some(head) = snapshot.status.head_sha.as_deref() else { return };
+    let Some(commit) = repo.history.ready().and_then(|history| history.first()).filter(|c| c.sha == head)
+    else {
+        return;
+    };
+    ui.horizontal(|ui| {
+        if secondary_button(ui, text::UNDO, !disabled).clicked() {
+            actions.push(Action::UndoCommit);
+        }
+        ui.add(egui::Label::new(muted_text(ui, &text::last_commit(&commit.summary))).truncate());
+    });
+}
+
+/// Lines can be picked in modified, new, renamed and deleted files. Not in conflicts, not during a
+/// merge (git only commits a merge whole) and not during a rebase (nothing is committed by hand).
 fn can_pick_lines(repo: &RepoStore, change: &FileChange) -> bool {
-    let merging = repo.snapshot.ready().is_some_and(|snapshot| snapshot.merge_message.is_some());
-    !merging && matches!(change.kind, ChangeKind::Modified | ChangeKind::Added | ChangeKind::Untracked)
+    let merging = repo
+        .snapshot
+        .ready()
+        .and_then(|snapshot| snapshot.in_progress())
+        .is_some_and(|state| matches!(state, InProgress::Merge | InProgress::Rebase(_)));
+    !merging
+        && matches!(
+            change.kind,
+            ChangeKind::Modified
+                | ChangeKind::Added
+                | ChangeKind::Untracked
+                | ChangeKind::Renamed
+                | ChangeKind::Deleted
+        )
 }
 
 /// GitHub Desktop's "Add co-authors": people credited on the commit with `Co-authored-by:` lines.
@@ -229,8 +303,11 @@ fn add_co_author(repo: &mut RepoStore, author: CoAuthor) {
     repo.co_author_query.clear();
 }
 
+/// A summary is needed, and at least one chosen file, except when amending: then the message alone
+/// can change.
 pub fn can_commit(repo: &RepoStore) -> bool {
-    !repo.commit_summary.trim().is_empty() && repo.changes().iter().any(|c| repo.is_included(&c.path))
+    let any_chosen = repo.changes().iter().any(|c| repo.is_included(&c.path));
+    !repo.commit_summary.trim().is_empty() && (any_chosen || repo.amending.is_some())
 }
 
 /// Right pane of the Changes tab.

@@ -14,6 +14,7 @@ use crate::ui::components::{
 use crate::ui::dialogs::{Dialog, MergeForm};
 use crate::ui::theme::{self, TOOLBAR_TEXT};
 use crate::utils::paths::display_name;
+use crate::utils::time;
 
 pub fn toolbar(ui: &mut Ui, view: &ViewContext<'_>, repo: Option<&RepoStore>, actions: &mut Vec<Action>) {
     let background = theme::palette(ui.visuals()).toolbar_background;
@@ -169,14 +170,17 @@ fn branch_menu(
             });
             // As in GitHub Desktop, merging lives at the bottom of the branch list.
             ui.separator();
-            let can_merge = snapshot.status.head.is_some()
-                && snapshot.status.has_commits
-                && snapshot.merge_message.is_none();
+            let can_merge =
+                snapshot.status.head.is_some() && snapshot.status.has_commits && !snapshot.is_busy_merging();
             let merge = egui::Button::new(text::merge_into(&current))
                 .wrap()
                 .min_size(egui::vec2(ui.available_width(), MIN_TARGET_SIZE));
             if ui.add_enabled(can_merge, merge).clicked() {
-                actions.push(Action::OpenDialog(Dialog::Merge(MergeForm::new(&current, &snapshot.branches))));
+                actions.push(Action::OpenDialog(Dialog::Merge(MergeForm::new(
+                    &current,
+                    &snapshot.branches,
+                    !snapshot.changes.is_empty(),
+                ))));
                 ui.close();
             }
         });
@@ -189,10 +193,15 @@ fn branch_row(
     branch: &Branch,
     actions: &mut Vec<Action>,
 ) {
-    let row = ui.add(
-        egui::Button::selectable(branch.is_current, &branch.name)
-            .min_size(egui::vec2(ui.available_width(), MIN_TARGET_SIZE)),
-    );
+    let mut button = egui::Button::selectable(branch.is_current, &branch.name)
+        .min_size(egui::vec2(ui.available_width(), MIN_TARGET_SIZE));
+    // As in GitHub Desktop: how long ago the branch's last commit was.
+    // Faded like a shortcut, except on the highlighted current branch, where faded text is unreadable.
+    if let Some(committed) = branch.committed {
+        let age = time::ago(committed, time::now());
+        button = if branch.is_current { button.right_text(age) } else { button.shortcut_text(age) };
+    }
+    let row = ui.add(button);
     if left_clicked(&row) && !branch.is_current {
         actions.push(Action::SwitchBranch(branch.clone()));
         ui.close();
@@ -223,8 +232,19 @@ fn sync_button(
         return;
     }
     let ahead_behind = text::ahead_behind(status.ahead, status.behind);
+    let rewritten = status.head.as_ref().is_some_and(|head| repo.rewritten_branches.contains(head));
     let (caption, action) = if status.upstream.is_none() {
         (text::PUBLISH_BRANCH, Action::Push)
+    } else if rewritten && status.ahead > 0 && status.behind > 0 {
+        (
+            text::FORCE_PUSH_ORIGIN,
+            Action::OpenDialog(Dialog::confirm(
+                text::FORCE_PUSH_TITLE,
+                text::FORCE_PUSH_BODY.to_owned(),
+                text::FORCE_PUSH_ORIGIN,
+                Action::ForcePush,
+            )),
+        )
     } else if status.behind > 0 {
         (text::PULL_ORIGIN, Action::Pull)
     } else if status.ahead > 0 {

@@ -38,7 +38,23 @@ fn untracked_file_diff(file: &Path) -> GitResult<Diff> {
 /// Commits the chosen files. When every changed file is chosen it commits the whole tree, which
 /// also covers finishing a merge; otherwise only the chosen paths go in.
 pub fn commit(repo: &Path, message: &str, chosen: &[FileChange], all_chosen: bool) -> GitResult<()> {
-    if chosen.is_empty() {
+    commit_or_amend(repo, message, chosen, all_chosen, false)
+}
+
+/// Replaces the last commit with one that also has the chosen files and the new message. With no
+/// files chosen only the message changes.
+pub fn amend(repo: &Path, message: &str, chosen: &[FileChange], all_chosen: bool) -> GitResult<()> {
+    commit_or_amend(repo, message, chosen, all_chosen, true)
+}
+
+fn commit_or_amend(
+    repo: &Path,
+    message: &str,
+    chosen: &[FileChange],
+    all_chosen: bool,
+    amend: bool,
+) -> GitResult<()> {
+    if chosen.is_empty() && !amend {
         return Err(GitError::new("Choose at least one file to commit"));
     }
     if message.trim().is_empty() {
@@ -51,15 +67,20 @@ pub fn commit(repo: &Path, message: &str, chosen: &[FileChange], all_chosen: boo
             .filter(|change| change.kind == ChangeKind::Untracked)
             .map(|change| change.path.as_str()),
     )?;
-    if all_chosen {
+    let mut args = vec!["commit", "--file", "-"];
+    if amend {
+        args.push("--amend");
+    }
+    if all_chosen && !chosen.is_empty() {
         run(repo, &["add", "--all"])?;
-        run_with_input(repo, &["commit", "--file", "-"], Some(message))?;
+        run_with_input(repo, &args, Some(message))?;
         return Ok(());
     }
 
     let paths = paths_with_originals(chosen);
     stage(repo, chosen)?;
-    let mut args = vec!["commit", "--file", "-", "--only", "--"];
+    // `--only` with no paths (amending the message alone) leaves out whatever is staged.
+    args.extend(["--only", "--"]);
     args.extend(paths.iter().map(String::as_str));
     run_with_input(repo, &args, Some(message))?;
     Ok(())

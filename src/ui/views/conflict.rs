@@ -15,8 +15,11 @@ pub fn conflict_view(ui: &mut Ui, repo: &RepoStore, view: &ViewContext<'_>, acti
     let Some(path) = repo.selected_file.clone() else { return };
     let Loadable::Ready(file) = &repo.conflict else { return loadable_status(ui, &repo.conflict) };
     let busy = view.busy.is_some();
-    let branch = repo.snapshot.ready().and_then(|snapshot| snapshot.status.head.clone());
-    // `HEAD` means the current branch, which is clearer by name.
+    // `HEAD` means the current branch, which is clearer by name. During a rebase HEAD is the branch
+    // being rebased onto, and git's "theirs" is your own commit being replayed.
+    let rebase_onto =
+        repo.snapshot.ready().and_then(|snapshot| snapshot.rebase.as_ref()).map(|r| r.onto.clone());
+    let branch = rebase_onto.clone().or_else(|| repo.snapshot.ready().and_then(|s| s.status.head.clone()));
     let ours_name = |label: &str| match (&branch, label) {
         (Some(branch), "HEAD" | "") => branch.clone(),
         _ => label.to_owned(),
@@ -56,12 +59,21 @@ pub fn conflict_view(ui: &mut Ui, repo: &RepoStore, view: &ViewContext<'_>, acti
             egui::Frame::group(ui.style()).inner_margin(egui::Margin::same(PANEL_PADDING)).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.label(RichText::new(text::conflict_number(index + 1, blocks.len())).strong());
-                side(ui, &text::yours(&ours_name(&block.ours_label)), &block.ours, palette.hunk_background);
+                let ours = ours_name(&block.ours_label);
+                let (ours_side, theirs_side) = match &rebase_onto {
+                    Some(onto) => (text::from_branch(onto), text::your_commit(&block.theirs_label)),
+                    None => (text::yours(&ours), text::theirs(&block.theirs_label)),
+                };
+                side(ui, &ours_side, &block.ours, palette.hunk_background);
                 if let Some(base) = &block.base {
                     side(ui, text::CONFLICT_BASE, base, Color32::TRANSPARENT);
                 }
-                side(ui, &text::theirs(&block.theirs_label), &block.theirs, palette.added_background);
-                choices(ui, busy, |choice| {
+                side(ui, &theirs_side, &block.theirs, palette.added_background);
+                let labels = match &rebase_onto {
+                    Some(onto) => [text::use_branch(onto), text::USE_YOUR_COMMIT.to_owned()],
+                    None => [text::USE_OURS.to_owned(), text::USE_THEIRS.to_owned()],
+                };
+                choices(ui, busy, &labels, |choice| {
                     actions.push(Action::ResolveConflict { file: path.clone(), index, choice });
                 });
             });
@@ -88,11 +100,12 @@ fn side(ui: &mut Ui, label: &str, content: &str, background: Color32) {
     });
 }
 
-fn choices(ui: &mut Ui, busy: bool, mut choose: impl FnMut(ConflictChoice)) {
+/// `labels` name the two sides: mine and theirs, or during a rebase the branch and your commit.
+fn choices(ui: &mut Ui, busy: bool, labels: &[String; 2], mut choose: impl FnMut(ConflictChoice)) {
     ui.horizontal_wrapped(|ui| {
         for (label, choice) in [
-            (text::USE_OURS, ConflictChoice::Ours),
-            (text::USE_THEIRS, ConflictChoice::Theirs),
+            (labels[0].as_str(), ConflictChoice::Ours),
+            (labels[1].as_str(), ConflictChoice::Theirs),
             (text::USE_BOTH, ConflictChoice::Both),
         ] {
             if secondary_button(ui, label, !busy).clicked() {

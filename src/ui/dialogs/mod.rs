@@ -21,10 +21,9 @@ use crate::services::settings::Settings;
 use crate::services::update;
 use crate::ui::actions::Action;
 use crate::ui::components::{
-    DialogResult, danger_button, dialog, field_label, folder_picker, operation_status, primary_button,
-    secondary_button,
+    DialogResult, danger_button, dialog, field_label, folder_picker, operation_status, option_hint,
+    primary_button, secondary_button,
 };
-use crate::ui::theme;
 
 #[derive(Debug, Clone)]
 pub struct Confirmation {
@@ -75,6 +74,7 @@ pub enum Dialog {
         verification_uri: String,
     },
     CreatePull(PullForm),
+    EditPull(PullEditForm),
 }
 
 /// Read-only app state some dialogs show.
@@ -98,7 +98,7 @@ pub struct DialogContext<'a> {
 pub use merge::MergeForm;
 pub use prompt::show_prompt;
 pub use publish::PublishForm;
-pub use pull::PullForm;
+pub use pull::{PullEditForm, PullForm};
 pub use tag::TagForm;
 
 impl Dialog {
@@ -288,6 +288,9 @@ pub fn show(
         Dialog::CreatePull(form) => dialog(ctx, "create-pull", text::CREATE_PULL_TITLE, |ui| {
             pull::show(ui, context, form, actions);
         }),
+        Dialog::EditPull(form) => dialog(ctx, "edit-pull", text::EDIT_PULL_TITLE, |ui| {
+            pull::show_edit(ui, context, form, actions);
+        }),
         Dialog::Merge(form) => dialog(ctx, "merge", &text::merge_title(&form.into), |ui| {
             merge::show(ui, context, form, actions);
         }),
@@ -320,13 +323,13 @@ pub(super) fn footer_buttons(
 
 /// A radio option with a muted explanation under it.
 fn choice(ui: &mut Ui, current: &mut bool, value: bool, label: &str, hint: &str) {
+    choice_value(ui, current, value, label, hint);
+}
+
+/// [`choice`] for any kind of value.
+fn choice_value<T: PartialEq>(ui: &mut Ui, current: &mut T, value: T, label: &str, hint: &str) {
     ui.radio_value(current, value, label);
-    let muted = theme::palette(ui.visuals()).muted_text;
-    ui.horizontal(|ui| {
-        // Lines the hint up with the label, past the radio button.
-        ui.add_space(ui.spacing().icon_width + ui.spacing().icon_spacing);
-        ui.add(egui::Label::new(RichText::new(hint).color(muted)).wrap());
-    });
+    option_hint(ui, hint);
     ui.add_space(4.0);
 }
 

@@ -12,18 +12,18 @@ use crate::constants::git::DEFAULT_REMOTE;
 use crate::constants::text;
 use crate::git::control::{self, OperationControl};
 use crate::git::{
-    GitError, GitResult, branches, changes, conflicts, history, merge, partial, remote, repository, stash,
-    tags,
+    GitError, GitResult, branches, changes, commits, conflicts, history, merge, partial, rebase, remote,
+    repository, stash, tags,
 };
 use crate::github;
 use crate::github::device::{self, DeviceCode};
-use crate::models::{Branch, ChangeKind, FileChange, LineSelection};
+use crate::models::{Branch, ChangeKind, FileChange, InProgress, LineSelection, MergeMethod};
 use crate::services::askpass::GitHubAccount;
 use crate::services::secrets;
 use crate::services::system;
 use crate::services::tasks::{OperationKind, TaskOutput};
 use crate::services::{editor, image_preview, update};
-use crate::stores::{Loadable, RepoStore};
+use crate::stores::{Loadable, PendingRewrite, RepoStore};
 use crate::ui::actions::{Action, Tab};
 use crate::ui::dialogs::Dialog;
 use crate::ui::{theme, views};
@@ -126,10 +126,11 @@ impl DesktopApp {
         self.cancellable = false;
     }
 
+    /// Opens a repository the user added, cloned or created. Once it opens, the folder it's in
+    /// becomes the starting folder for the next add, clone or create.
     fn open_repository_in_background(
         &mut self,
         label: &'static str,
-        remember_folder: Option<PathBuf>,
         cancellable: bool,
         job: impl FnOnce() -> GitResult<PathBuf> + Send + 'static,
     ) {
@@ -138,10 +139,8 @@ impl DesktopApp {
         }
         self.busy = Some(label);
         let control = self.start_control(cancellable);
-        self.tasks.spawn(move || TaskOutput::RepositoryOpened {
-            result: control::with_control(control, job),
-            remember_folder,
-        });
+        self.tasks
+            .spawn(move || TaskOutput::RepositoryOpened { result: control::with_control(control, job) });
     }
 
     /// The remote and branch state needed by push and tag operations.
@@ -159,6 +158,27 @@ impl DesktopApp {
             self.dialog_opening += 1;
         } else {
             self.run_operation(OperationKind::SwitchBranch, move |path| branches::switch(path, &branch));
+        }
+    }
+
+    fn merge(&mut self, branch: String, method: MergeMethod) {
+        let Some(into) = self.current_branch() else { return };
+        match method {
+            MergeMethod::Merge => {
+                self.run_operation(OperationKind::Merge, move |path| merge::merge(path, &branch));
+            }
+            MergeMethod::Squash => {
+                self.run_operation(OperationKind::Merge, move |path| merge::squash(path, &branch, &into));
+            }
+            MergeMethod::Rebase => {
+                // A pushed branch diverges from the remote once rebased, so it needs a force push.
+                let pushed =
+                    self.repo.as_ref().and_then(|repo| repo.snapshot.ready()?.status.upstream.clone());
+                if let (Some(repo), Some(_)) = (self.repo.as_mut(), pushed) {
+                    repo.rewritten_branches.insert(into);
+                }
+                self.run_operation(OperationKind::Rebase, move |path| rebase::rebase(path, &branch));
+            }
         }
     }
 
@@ -221,19 +241,17 @@ impl DesktopApp {
                 }
             }
             Action::AddRepository(path) => {
-                self.open_repository_in_background(text::OPENING_REPOSITORY, None, false, move || {
+                self.open_repository_in_background(text::OPENING_REPOSITORY, false, move || {
                     repository::find_root(&path)
                 });
             }
             Action::CloneRepository { url, parent } => {
-                let remember = Some(parent.clone());
-                self.open_repository_in_background(text::CLONING, remember, true, move || {
+                self.open_repository_in_background(text::CLONING, true, move || {
                     repository::clone(&url, &parent)
                 });
             }
             Action::CreateRepository(path) => {
-                let remember = path.parent().map(Path::to_path_buf);
-                self.open_repository_in_background(text::CREATING_REPOSITORY, remember, false, move || {
+                self.open_repository_in_background(text::CREATING_REPOSITORY, false, move || {
                     if path.exists() && path.read_dir().is_ok_and(|mut entries| entries.next().is_some()) {
                         return Err(GitError::new(format!(
                             "{} already exists and isn't empty",
@@ -293,6 +311,29 @@ impl DesktopApp {
             Action::PostComment { number, body } => self.post_comment(number, body),
             Action::OpenCreatePull => self.open_create_pull(),
             Action::CreatePull(form) => self.create_pull(form),
+            Action::SetPullView(view) => {
+                if let Some(repo) = self.repo.as_mut() {
+                    repo.pull_view = view;
+                }
+            }
+            Action::SelectPullFile(file) => {
+                if let Some(repo) = self.repo.as_mut() {
+                    repo.selected_pull_file = Some(file);
+                    repo.line_comment = None;
+                }
+            }
+            Action::StartLineComment(target) => self.start_line_comment(target),
+            Action::CancelLineComment => {
+                if let Some(repo) = self.repo.as_mut() {
+                    repo.line_comment = None;
+                }
+            }
+            Action::PostLineComment => self.post_line_comment(),
+            Action::SubmitReview => self.submit_review(),
+            Action::MergePull { number, method } => self.merge_pull(number, method),
+            Action::OpenEditPull => self.open_edit_pull(),
+            Action::SavePull(form) => self.save_pull(form),
+            Action::SetDraft { number, draft } => self.set_draft(number, draft),
             Action::CloseDetail => self.detail_open = false,
             Action::Refresh => {
                 self.load_snapshot();
@@ -314,6 +355,13 @@ impl DesktopApp {
             Action::SelectCommit(sha) => self.select_commit(sha),
             Action::SelectCommitFile(file) => self.select_commit_file(file),
             Action::Commit => self.commit(),
+            Action::StartAmend => self.start_amend(),
+            Action::CancelAmend => {
+                if let Some(repo) = self.repo.as_mut() {
+                    repo.cancel_amend();
+                }
+            }
+            Action::UndoCommit => self.undo_commit(),
             Action::Discard(files) => {
                 self.run_operation(OperationKind::Discard, move |path| changes::discard(path, &files));
             }
@@ -333,6 +381,7 @@ impl DesktopApp {
                     remote::push(path, &status, remote_name.as_deref())
                 });
             }
+            Action::ForcePush => self.run_operation(OperationKind::ForcePush, remote::force_push),
             Action::PublishToGitHub { name, description, private, organization } => {
                 self.publish_to_github(name, description, private, organization);
             }
@@ -375,10 +424,18 @@ impl DesktopApp {
                     branch,
                 });
             }
-            Action::Merge(branch) => {
-                self.run_operation(OperationKind::Merge, move |path| merge::merge(path, &branch));
+            Action::Merge { branch, method } => self.merge(branch, method),
+            Action::AbortMerge => {
+                let squash = self
+                    .repo
+                    .as_ref()
+                    .and_then(|repo| repo.snapshot.ready())
+                    .is_some_and(|snapshot| snapshot.in_progress() == Some(InProgress::Squash));
+                let abort = if squash { merge::abort_squash } else { merge::abort };
+                self.run_operation(OperationKind::AbortMerge, abort);
             }
-            Action::AbortMerge => self.run_operation(OperationKind::AbortMerge, merge::abort),
+            Action::ContinueRebase => self.run_operation(OperationKind::Rebase, rebase::continue_rebase),
+            Action::AbortRebase => self.run_operation(OperationKind::AbortRebase, rebase::abort),
             Action::ResolveConflict { file, index, choice } => {
                 self.run_operation(OperationKind::Resolve, move |path| {
                     conflicts::choose(path, &file, index, choice)
@@ -561,13 +618,57 @@ impl DesktopApp {
         });
     }
 
+    /// The last commit's message: from the loaded history, or read from git if that isn't loaded.
+    fn head_message(&self) -> Option<String> {
+        let repo = self.repo.as_ref()?;
+        repo.head_message().or_else(|| commits::last_message(&repo.path).ok())
+    }
+
+    /// Branch to remember as rewritten when the last commit is already pushed.
+    fn pushed_branch(&self) -> Option<String> {
+        let snapshot = self.repo.as_ref()?.snapshot.ready()?;
+        snapshot.head_pushed.then(|| snapshot.status.head.clone()).flatten()
+    }
+
+    fn start_amend(&mut self) {
+        let Some(message) = self.head_message() else {
+            self.error = Some(text::NO_LAST_COMMIT_MESSAGE.to_owned());
+            return;
+        };
+        if let Some(repo) = self.repo.as_mut() {
+            repo.start_amend(&message);
+        }
+        self.tab = Tab::Changes;
+    }
+
+    fn undo_commit(&mut self) {
+        if self.busy.is_some() {
+            return;
+        }
+        let message = self.head_message();
+        let pushed_branch = self.pushed_branch();
+        let Some(repo) = self.repo.as_mut() else { return };
+        // Like GitHub Desktop, the undone commit's message goes back into the form, unless the user
+        // is already writing one.
+        let message = message.filter(|_| repo.commit_summary.trim().is_empty() && repo.amending.is_none());
+        repo.pending_rewrite = Some(PendingRewrite { message, pushed_branch });
+        self.run_operation(OperationKind::UndoCommit, |path| commits::undo_last(path).map(|_| ()));
+    }
+
     fn commit(&mut self) {
         let Some(repo) = self.repo.as_ref() else { return };
         if !views::can_commit(repo) {
             return;
         }
+        let amend = repo.amending.is_some();
         let message = repo.commit_message();
-        let merging = repo.snapshot.ready().is_some_and(|snapshot| snapshot.merge_message.is_some());
+        let in_progress = repo.snapshot.ready().and_then(|snapshot| snapshot.in_progress());
+        let merging = in_progress == Some(InProgress::Merge);
+        let squashing = in_progress == Some(InProgress::Squash);
+        if amend && in_progress.is_some() {
+            self.error = Some(text::NOT_DURING_MERGE.to_owned());
+            return;
+        }
         // A merge can only be committed whole: git refuses a partial commit during one.
         let chosen = if merging { repo.changes().to_vec() } else { repo.included_changes() };
         let all_chosen = chosen.len() == repo.changes().len();
@@ -579,11 +680,21 @@ impl DesktopApp {
                 (!merging && !selection.excluded.is_empty()).then(|| (change.clone(), selection.clone()))
             })
             .collect();
-        self.run_operation(OperationKind::Commit, move |path| {
-            if !partial.is_empty() {
-                return partial::commit_with_lines(path, &message, &chosen, &partial, has_commits);
+        if amend {
+            let pushed_branch = self.pushed_branch();
+            if let Some(repo) = self.repo.as_mut() {
+                repo.pending_rewrite = Some(PendingRewrite { message: None, pushed_branch });
             }
-            if merging {
+        }
+        let kind = if amend { OperationKind::Amend } else { OperationKind::Commit };
+        self.run_operation(kind, move |path| {
+            if !partial.is_empty() {
+                return partial::commit_with_lines(path, &message, &chosen, &partial, has_commits, amend);
+            }
+            if amend {
+                return changes::amend(path, &message, &chosen, all_chosen);
+            }
+            if merging || squashing {
                 let unresolved = merge::unresolved(path, &chosen);
                 if !unresolved.is_empty() {
                     return Err(GitError::new(text::unresolved_conflicts(&unresolved)));

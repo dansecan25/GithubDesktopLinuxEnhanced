@@ -9,6 +9,11 @@ pub const WATCHDOG_INTERVAL: Duration = Duration::from_secs(1);
 /// A frame that takes longer than this counts as a freeze, and a report is written.
 pub const FREEZE_REPORT_AFTER: Duration = Duration::from_secs(5);
 
+/// A focused window that hasn't been drawn for this long counts as stalled, and a report is
+/// written. The watchdog asks a focused window to redraw every second, so a working one never gets
+/// near this. It catches the system's graphics getting stuck, outside the app's own code.
+pub const STALL_REPORT_AFTER: Duration = Duration::from_secs(15);
+
 /// Past this much memory the app writes a report and closes, before it slows down the computer.
 pub const SOFT_MEMORY_LIMIT_BYTES: u64 = 1536 * 1024 * 1024;
 

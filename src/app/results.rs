@@ -6,19 +6,19 @@ use super::DesktopApp;
 use crate::constants::text;
 use crate::services::askpass::GitHubAccount;
 use crate::services::tasks::{OperationKind, TaskOutput};
-use crate::stores::Loadable;
+use crate::stores::{Loadable, RepoStore};
 use crate::ui::dialogs::Dialog;
 
 impl DesktopApp {
     pub(super) fn apply_task(&mut self, output: TaskOutput) {
         match output {
-            TaskOutput::RepositoryOpened { result, remember_folder } => {
+            TaskOutput::RepositoryOpened { result } => {
                 self.finish_operation();
                 match result {
                     Ok(path) => {
                         self.dialog = None;
-                        if remember_folder.is_some() {
-                            self.settings.projects_directory = remember_folder;
+                        if let Some(folder) = path.parent() {
+                            self.settings.projects_directory = Some(folder.to_path_buf());
                         }
                         self.settings.add_repository(path.clone());
                         self.save_settings();
@@ -74,11 +74,8 @@ impl DesktopApp {
                 let is_current = self.repo_path().as_ref() == Some(&repo);
                 match result {
                     Ok(()) if is_current => {
-                        if kind == OperationKind::Commit
-                            && let Some(store) = self.repo.as_mut()
-                        {
-                            store.clear_commit_message();
-                            store.line_selections.clear();
+                        if let Some(store) = self.repo.as_mut() {
+                            after_operation(store, kind);
                         }
                         self.load_snapshot();
                         self.load_history();
@@ -86,6 +83,9 @@ impl DesktopApp {
                     Ok(()) => {}
                     Err(error) if error.cancelled => self.load_snapshot(),
                     Err(error) => {
+                        if let Some(store) = self.repo.as_mut().filter(|_| is_current) {
+                            store.pending_rewrite = None;
+                        }
                         self.error = Some(error.message);
                         self.load_snapshot();
                     }
@@ -93,7 +93,7 @@ impl DesktopApp {
             }
             pull @ (TaskOutput::Pulls { .. }
             | TaskOutput::PullDetail { .. }
-            | TaskOutput::CommentPosted { .. }
+            | TaskOutput::PullSent { .. }
             | TaskOutput::PullCreated { .. }
             | TaskOutput::PullFetched { .. }) => self.apply_pull_output(pull),
             TaskOutput::ProjectVersions { repo, target, result } => {
@@ -177,5 +177,31 @@ impl DesktopApp {
             }
             _ => {}
         }
+    }
+}
+
+/// Updates the open repository's form and state after an operation worked.
+fn after_operation(store: &mut RepoStore, kind: OperationKind) {
+    if matches!(kind, OperationKind::Commit | OperationKind::Amend) {
+        store.clear_commit_message();
+        store.line_selections.clear();
+    }
+    if let Some(rewrite) = store.pending_rewrite.take() {
+        if let Some(message) = rewrite.message {
+            store.fill_commit_message(&message);
+        }
+        store.rewritten_branches.extend(rewrite.pushed_branch);
+    }
+    // An aborted rebase leaves the branch as it was.
+    if kind == OperationKind::AbortRebase
+        && let Some(rebase) = store.snapshot.ready().and_then(|snapshot| snapshot.rebase.clone())
+    {
+        store.rewritten_branches.remove(&rebase.branch);
+    }
+    // Once pushed or pulled, the remote has the branch's history again.
+    if matches!(kind, OperationKind::ForcePush | OperationKind::Pull)
+        && let Some(branch) = store.snapshot.ready().and_then(|snapshot| snapshot.status.head.clone())
+    {
+        store.rewritten_branches.remove(&branch);
     }
 }

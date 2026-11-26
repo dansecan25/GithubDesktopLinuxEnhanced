@@ -5,4 +5,6 @@ pub struct Branch {
     pub is_remote: bool,
     pub is_current: bool,
     pub upstream: Option<String>,
+    /// When its last commit was made, in seconds since 1970. `None` when git doesn't say.
+    pub committed: Option<i64>,
 }

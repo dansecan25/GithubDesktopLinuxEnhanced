@@ -52,3 +52,16 @@ pub fn error_banner(ui: &mut Ui, message: &str) -> bool {
 pub fn muted_text(ui: &Ui, value: &str) -> RichText {
     RichText::new(value).small().color(theme::palette(ui.visuals()).muted_text)
 }
+
+/// A muted explanation under a radio option, lined up with its label. The row is only as tall as
+/// the text: `horizontal` would otherwise take the 40 px interact height.
+pub fn option_hint(ui: &mut Ui, hint: &str) {
+    let muted = theme::palette(ui.visuals()).muted_text;
+    ui.scope(|ui| {
+        ui.spacing_mut().interact_size.y = 0.0;
+        ui.horizontal(|ui| {
+            ui.add_space(ui.spacing().icon_width + ui.spacing().icon_spacing);
+            ui.add(egui::Label::new(RichText::new(hint).color(muted)).wrap());
+        });
+    });
+}

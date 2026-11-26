@@ -521,3 +521,182 @@ pub fn tag_version_mismatch(tag: &str, found: &[(String, String)]) -> String {
         files.join(", ")
     )
 }
+
+pub const NO_PUBLISHED_RELEASE: &str =
+    "No release is published yet. Drafts and pre-releases aren't offered as updates.";
+
+// Amending and undoing the last commit
+pub const AMEND_COMMIT: &str = "Amend commit…";
+pub const UNDO_COMMIT: &str = "Undo commit…";
+pub const UNDO: &str = "Undo";
+pub const AMEND_BUTTON: &str = "Amend last commit";
+pub const CANCEL_AMEND: &str = "Cancel amend";
+pub const AMENDING: &str = "Amending commit";
+pub const UNDOING_COMMIT: &str = "Undoing commit";
+pub const FORCE_PUSHING: &str = "Force pushing";
+pub const FORCE_PUSH_ORIGIN: &str = "Force push origin";
+pub const FORCE_PUSH_TITLE: &str = "Force push";
+pub const FORCE_PUSH_BODY: &str = "This branch's history was rewritten here, so a normal push would be \
+    refused. Force pushing replaces the branch on the remote with yours. If someone else pushed to it \
+    since your last fetch, git refuses and nothing is lost.";
+pub const AMENDING_IT: &str = "Amending";
+pub const UNDOING_IT: &str = "Undoing";
+pub const NOT_DURING_MERGE: &str = "Finish or abort the merge first.";
+pub const NO_LAST_COMMIT_MESSAGE: &str = "Could not read the last commit's message.";
+
+pub fn amending(summary: &str) -> String {
+    format!("Amending \"{summary}\". The changes you choose and this message replace it.")
+}
+
+pub fn last_commit(summary: &str) -> String {
+    format!("Last commit: {summary}")
+}
+
+pub fn rewrite_pushed_body(action: &str, remote: &str) -> String {
+    format!(
+        "This commit is already on {remote}. {action} it rewrites the branch's history, so you'll have \
+         to force push afterwards, and anyone who pulled it will have to deal with the change."
+    )
+}
+
+// Squash and rebase
+pub const SQUASH_AND_MERGE: &str = "Squash and merge";
+pub const REBASE: &str = "Rebase";
+pub const MERGE_METHOD_HINT: &str = "Keeps both histories, joined by a merge commit.";
+pub const SQUASH_HINT: &str = "All of the branch's changes become one new commit here.";
+pub const REBASE_HINT: &str =
+    "Your branch's commits are replayed on top of the other branch. This rewrites them.";
+pub const REBASE_NEEDS_CLEAN_TREE: &str =
+    "Commit or stash your changes before rebasing. Git rebases only a branch with no uncommitted changes.";
+pub const RESOLVE_BEFORE_CONTINUING: &str = "Resolve every conflicted file before continuing the rebase.";
+pub const REBASE_STOPPED: &str = "The rebase stopped on conflicts. Resolve the files marked with !, then \
+    continue the rebase, or abort it.";
+pub const SQUASH_IN_PROGRESS: &str = "Squash merge in progress. Resolve the files marked with !, then \
+    commit to finish it.";
+pub const ABORT_SQUASH_BODY: &str = "The files go back to how they were before the squash merge. Changes \
+    made to resolve conflicts are lost.";
+pub const CONTINUE_REBASE: &str = "Continue rebase";
+pub const ABORT_REBASE: &str = "Abort rebase";
+pub const ABORT_REBASE_BODY: &str = "Your branch goes back to how it was before the rebase.";
+pub const REBASING: &str = "Rebasing";
+pub const ABORTING_REBASE: &str = "Aborting rebase";
+
+pub fn squash_message(branch: &str, into: &str, summaries: &[&str]) -> String {
+    let list: Vec<String> = summaries.iter().map(|summary| format!("* {summary}")).collect();
+    format!("Squash merge branch '{branch}' into {into}\n\n{}", list.join("\n")).trim_end().to_owned()
+}
+
+pub fn squash_conflicts(branch: &str) -> String {
+    format!(
+        "Squashing {branch} caused conflicts. Resolve the files marked with !, then commit to finish, or \
+         abort it."
+    )
+}
+
+pub fn rebase_in_progress(branch: &str, onto: &str, step: usize, total: usize) -> String {
+    let at = if total > 0 { format!(" (commit {step} of {total})") } else { String::new() };
+    format!("Rebasing {branch} onto {onto}{at}. Resolve the files marked with !, then continue the rebase.")
+}
+
+pub fn merge_button(method: crate::models::MergeMethod, from: &str, into: &str) -> String {
+    use crate::models::MergeMethod;
+    match method {
+        MergeMethod::Merge => format!("Merge {from} into {into}"),
+        MergeMethod::Squash => format!("Squash and merge {from} into {into}"),
+        MergeMethod::Rebase => format!("Rebase {into} onto {from}"),
+    }
+}
+
+pub fn rebase_preview(branch: &str, onto: &str, own: usize, new: usize) -> String {
+    if new == 0 {
+        return format!("{branch} already has everything in {onto}.");
+    }
+    format!("This will apply {}'s {} on top of {} from {onto}.", branch, commits(own), commits(new))
+}
+
+// Pull request reviews, line comments, merging and editing
+pub const REVIEW_APPROVED: &str = "approved";
+pub const REVIEW_CHANGES_REQUESTED: &str = "requested changes";
+pub const REVIEW_COMMENTED: &str = "reviewed";
+pub const MERGE_REFUSED: &str = "GitHub didn't merge the pull request.";
+pub const GITHUB_REFUSED: &str = "GitHub refused the change.";
+pub const FILES_CHANGED: &str = "Files changed";
+pub const SELECT_PULL_FILE: &str = "Select a file to see its changes";
+pub const NO_PULL_DIFF: &str = "GitHub doesn't show this file's diff (binary or too large).";
+pub const LINE_COMMENT_HINT: &str = "Click a line number to comment on that line.";
+pub const LINE_COMMENT_FIELD: &str = "Leave a comment on this line";
+pub const REPLY_FIELD: &str = "Reply to the comments on this line";
+pub const ADD_LINE_COMMENT: &str = "Add comment";
+pub const REPLY_BUTTON: &str = "Reply";
+pub const OUTDATED: &str = "outdated";
+pub const REVIEW_CHANGES: &str = "Review changes";
+pub const REVIEW_HINT: &str = "Leave a review message";
+pub const REVIEW_COMMENT: &str = "Comment";
+pub const REVIEW_COMMENT_HINT: &str = "General feedback without approving.";
+pub const REVIEW_APPROVE: &str = "Approve";
+pub const REVIEW_APPROVE_HINT: &str = "Give your approval to merge these changes.";
+pub const REVIEW_REQUEST_CHANGES: &str = "Request changes";
+pub const REVIEW_REQUEST_CHANGES_HINT: &str = "Feedback that must be addressed before merging.";
+pub const SUBMIT_REVIEW: &str = "Submit review";
+pub const MERGE_PULL: &str = "Merge pull request";
+pub const MERGE_PULL_SQUASH: &str = "Squash and merge";
+pub const MERGE_PULL_REBASE: &str = "Rebase and merge";
+pub const MERGE_PULL_BODY: &str = "Merge this pull request on GitHub? Fetch afterwards to get the result.";
+pub const MERGED: &str = "This pull request is merged.";
+pub const MERGE_CHECKING: &str = "GitHub is checking whether this can be merged…";
+pub const MERGE_CONFLICTS: &str = "This branch has conflicts that must be resolved before merging.";
+pub const MERGE_BLOCKED: &str = "Merging is blocked: required reviews or checks haven't passed.";
+pub const MERGE_BEHIND: &str = "This branch is behind its base branch and must be updated first.";
+pub const MERGE_DRAFT: &str = "Draft pull requests can't be merged. Mark it ready for review first.";
+pub const MERGE_UNSTABLE: &str = "Some checks failed or are still running, but merging is allowed.";
+pub const MERGE_CLEAN: &str = "This branch can be merged.";
+pub const EDIT_PULL: &str = "Edit…";
+pub const EDIT_PULL_TITLE: &str = "Edit pull request";
+pub const MARK_READY: &str = "Ready for review";
+pub const CONVERT_TO_DRAFT: &str = "Convert to draft";
+
+pub fn files_changed(count: usize) -> String {
+    format!("{FILES_CHANGED} ({count})")
+}
+
+pub fn line_comment_on(path: &str, line: u32) -> String {
+    format!("{path}, line {line}")
+}
+
+pub fn file_stats(additions: u32, deletions: u32) -> String {
+    format!("+{additions} −{deletions}")
+}
+
+pub fn review_entry(author: &str, verdict: &str) -> String {
+    format!("{author} {verdict}")
+}
+
+pub fn outdated_on(path: &str) -> String {
+    format!("on {path} ({OUTDATED})")
+}
+pub const USE_YOUR_COMMIT: &str = "Use your commit";
+
+pub fn from_branch(branch: &str) -> String {
+    format!("From {branch}")
+}
+
+pub fn your_commit(label: &str) -> String {
+    format!("Your commit ({label})")
+}
+
+pub fn use_branch(branch: &str) -> String {
+    format!("Use {branch}")
+}
+
+// Relative times, as in "3 days ago". See `utils/time.rs`.
+pub const JUST_NOW: &str = "just now";
+pub const MINUTE: &str = "minute";
+pub const HOUR: &str = "hour";
+pub const DAY: &str = "day";
+pub const MONTH: &str = "month";
+pub const YEAR: &str = "year";
+
+pub fn time_ago(count: i64, unit: &str) -> String {
+    let plural = if count == 1 { "" } else { "s" };
+    format!("{count} {unit}{plural} ago")
+}

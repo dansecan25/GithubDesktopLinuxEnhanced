@@ -22,7 +22,8 @@ echo "==> Building ${PACKAGE}"
 cargo build --locked --release
 
 echo "==> Packaging"
-rm -rf "dist/${PACKAGE}"
+# Only this version's package is kept, so an older install.sh can't be run by mistake.
+rm -rf dist/"${NAME}"-*
 mkdir -p "dist/${PACKAGE}"
 cp "target/release/${NAME}" "dist/${PACKAGE}/"
 cp packaging/${NAME}.desktop packaging/${NAME}.svg packaging/install.sh "dist/${PACKAGE}/"

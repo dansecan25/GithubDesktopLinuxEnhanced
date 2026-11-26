@@ -5,9 +5,11 @@ use super::{parse, stash};
 use crate::constants::text::{self, STASH_MESSAGE};
 use crate::models::Branch;
 
+/// Local and remote branches, the most recently committed to first (as GitHub Desktop lists them).
 pub fn list(path: &Path) -> GitResult<Vec<Branch>> {
     let format = format!("--format={}", parse::branch_format());
-    let output = run(path, &["for-each-ref", &format, "refs/heads", "refs/remotes"])?;
+    let output =
+        run(path, &["for-each-ref", "--sort=-committerdate", &format, "refs/heads", "refs/remotes"])?;
     Ok(parse::parse_branches(&output))
 }
 

@@ -32,7 +32,7 @@ Available now:
 
 - **Repositories**: add an existing local repository, clone one (full URL, SSH address or the
   `owner/repo` shorthand), create a new one, switch between them, and remove them from the list.
-  Clone and create remember the last folder you used.
+  Add, clone and create remember the folder of the last repository you opened.
 - **Changes**: see every changed file with a coloured diff, choose which files go into the commit
   with checkboxes, and commit with a summary and description.
 - **Image previews**: a changed PNG, JPEG, WebP, GIF, BMP or ICO file shows the picture before and
@@ -43,7 +43,13 @@ Available now:
   committed to the repository.
 - **Commit single lines**: click a line's number in the diff to leave it out of the commit, or an
   `@@` line's number for the whole block. The file's checkbox shows a dash when only part of it is
-  chosen; the lines left out stay as uncommitted changes.
+  chosen; the lines left out stay as uncommitted changes. Works in new, changed, renamed and
+  deleted files, and in files with Windows (CRLF) line endings.
+- **Undo and amend**: **Undo** under the commit button takes back a last commit that isn't pushed
+  yet: its changes become uncommitted again and its message goes back into the form. In History,
+  right-click the last commit → **Amend commit…** to change its message or add more changes, or
+  **Undo commit…**. Both warn first when the commit is already on the remote; the sync button then
+  offers **Force push origin** (safely: it refuses if someone else pushed meanwhile).
 - **Copy from diffs**: drag over lines (or Shift-click) to select them, then Ctrl+C or right-click
   → **Copy**. The code is copied without the `+` and `-` markers; **Copy as diff** keeps them.
 - **Right-click menus like GitHub Desktop's**: open a repository or file in your code editor, show it
@@ -56,23 +62,31 @@ Available now:
 - **Discard**: throw away the changes to one file or to all of them, after confirming.
 - **Stash**: stash all changes (including new files), restore a stash, or discard it.
 - **History**: browse the last 500 commits on the current branch, with their tags, files and diffs.
-- **Branches**: switch, filter, create (names are cleaned up the way GitHub Desktop does) and delete
+- **Branches**: listed with the most recently committed-to first, each with how long ago its last
+  commit was ("3 days ago"). Switch, filter, create (names are cleaned up the way GitHub Desktop does) and delete
   local branches, and check out remote branches. Switching with uncommitted changes asks, as
   GitHub Desktop does, whether to **leave your changes on the current branch** (they're stashed and
   show up again under **Stashed changes** when you come back) or **bring them to the new branch**.
 - **Merging**: at the bottom of the branch menu, **Choose a branch to merge into &lt;current&gt;**
   shows how many commits will come in and which files would conflict before anything changes, then
-  **Create a merge commit**. If there are conflicts, click each conflicted file (`!`) to resolve it
-  in the app: **Use mine**, **Use theirs** or **Use both** for each conflict, or take the whole file
-  from one side, then **Mark as resolved** and commit. Or **Abort merge**.
+  **Create a merge commit**, **Squash and merge** (all its changes as one new commit) or
+  **Rebase** (your branch's commits replayed on top of it). If there are conflicts, click each
+  conflicted file (`!`) to resolve it in the app: **Use mine**, **Use theirs** or **Use both** for
+  each conflict, or take the whole file from one side, then **Mark as resolved** and commit. Or
+  **Abort merge**. A rebase that stops on a conflict is finished with **Continue rebase** (or
+  **Abort rebase**).
 - **Sync**: one button that publishes, pulls, pushes or fetches depending on the branch, with an
   ahead/behind count. A new branch is published to the remote with one click. Fetch, pull, push and
   clone show git's progress and can be cancelled.
 - **Publish repository**: put a local repository on GitHub (public or private), on your account or
   in one of your organizations, in one step. Or connect any existing remote URL and push.
 - **Pull requests**: the **Pull requests** tab (**PRs** when the sidebar is narrow) lists the open
-  pull requests with their checks, description and conversation. Comment, open one on GitHub, or
-  **Check out branch** (pull requests from forks too). **Create pull request…** in the branch menu
+  pull requests with their checks, description, conversation and reviews. Comment, **Review
+  changes** (comment, approve or request changes), **Merge pull request** with any method the
+  repository allows, **Edit…** the title and description, mark a draft **Ready for review** or
+  **Convert to draft**, open it on GitHub, or **Check out branch** (pull requests from forks too).
+  **Files changed** shows each file's diff with the line comments under their lines; click a line
+  number to comment on it, or to reply in its thread. **Create pull request…** in the branch menu
   opens one from the current branch, as a draft if you like.
 - **Tags for releases**: create a tag on the current commit (branch menu) or any commit (right-click
   in History). The dialog suggests the next patch, minor and major version after your highest
@@ -88,10 +102,6 @@ Available now:
   screen, keyboard shortcuts, and screen reader labels.
 - **A window that can't get lost**: sizes are only saved when the window is visible and in a normal
   state, and every saved size is checked again before use. See [Window size](#window-size).
-
-Planned:
-
-- Amend and undo the last commit.
 
 ## Install
 
@@ -212,7 +222,10 @@ The app can't take your whole computer down with it:
   `GDE_MEMORY_CAP=off github-desktop-enhanced` starts it without the limit.
 - If it goes over 1.5 GB, it saves a report and closes itself, and tells you on the next start.
 - If the window stops responding for 5 seconds, it saves a report of what it was doing and which git
-  commands were running.
+  commands were running. It also saves one if the focused window isn't drawn at all for 15 seconds
+  (the graphics driver stuck), with the GPU it was drawn on.
+- Frames are shown without waiting for vsync, and capped at 60 a second. With NVIDIA on Wayland,
+  waiting for vsync could stop the window from ever updating again.
 - Git output is capped (diffs at 2 MB, other commands at 64 MB), and local git commands are stopped
   after 5 minutes. Clone, fetch, pull, push and commit have no time limit.
 - New files adding up to more than 1 GB or 50,000 files aren't stashed or committed. That's almost
@@ -229,6 +242,7 @@ file contents or commit messages.
 ./limited.sh cargo clippy --all-targets     # lints
 cargo fmt                                   # formatting
 GDE_SCREENSHOT_DIR=/tmp/shots ./limited.sh cargo test --test ui_screens -- --ignored   # renders the screens to PNG
+GDE_SCREENSHOT_DIR=/tmp/shots ./limited.sh cargo test --test pull_screens -- --ignored # pull request pages, with made-up data
 GDE_README_SCREENSHOTS=docs/screenshots ./limited.sh cargo test --test readme_screenshots -- --ignored   # refreshes the README images
 ```
 

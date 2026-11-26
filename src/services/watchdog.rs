@@ -2,7 +2,8 @@
 //!
 //! A background thread checks once a second that the window isn't stuck in a frame and that the
 //! app's memory stays under `SOFT_MEMORY_LIMIT_BYTES`. A stuck frame writes a report, with what the
-//! app was doing and which git commands were running. Going over the memory limit writes a report
+//! app was doing and which git commands were running. So does a focused window that stops being
+//! drawn at all (the graphics stack stuck, outside any frame). Going over the memory limit writes a report
 //! and closes the app before it can slow down the computer. Only `main` starts it; without it
 //! (tests) every call here does nothing.
 
@@ -13,10 +14,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use eframe::egui;
+
 use crate::constants::app::{APP_NAME, CONFIG_DIR_NAME, VERSION};
 use crate::constants::safety::{
     FREEZE_REPORT_AFTER, LAST_EXIT_FILE, MAX_REPORTS, MEMORY_LIMIT_EXIT_CODE, REPORTS_FOLDER,
-    SOFT_MEMORY_LIMIT_BYTES, WATCHDOG_INTERVAL,
+    SOFT_MEMORY_LIMIT_BYTES, STALL_REPORT_AFTER, WATCHDOG_INTERVAL,
 };
 use crate::constants::text;
 use crate::git::runner;
@@ -33,9 +36,18 @@ struct Frame {
     /// Whether this frame got stuck, and the report written for it.
     stuck: bool,
     report: Option<PathBuf>,
+    /// When the last frame started, and whether the window had focus then.
+    last_started: Option<Instant>,
+    focused: bool,
+    /// The report written for a window that stopped being drawn, until it's drawn again.
+    stall_report: Option<PathBuf>,
 }
 
 static FRAME: OnceLock<Mutex<Frame>> = OnceLock::new();
+/// Lets the watchdog ask the window to redraw.
+static CONTEXT: OnceLock<egui::Context> = OnceLock::new();
+/// The GPU and driver drawing the window, for reports.
+static GRAPHICS: OnceLock<String> = OnceLock::new();
 
 fn frame() -> Option<MutexGuard<'static, Frame>> {
     FRAME.get().map(|frame| frame.lock().unwrap_or_else(|poisoned| poisoned.into_inner()))
@@ -50,6 +62,7 @@ pub fn start() {
             std::thread::sleep(WATCHDOG_INTERVAL);
             check_memory();
             check_frame();
+            check_stall();
         }
     });
     if let Err(error) = spawned {
@@ -57,10 +70,33 @@ pub fn start() {
     }
 }
 
+/// Gives the watchdog the window's context, so it can ask for redraws.
+pub fn attach(ctx: &egui::Context) {
+    let _ = CONTEXT.set(ctx.clone());
+}
+
+/// Records which GPU draws the window, for reports.
+pub fn set_graphics(description: String) {
+    let _ = GRAPHICS.set(description);
+}
+
+/// Call every frame with whether the window has focus.
+pub fn set_focused(focused: bool) {
+    if let Some(mut frame) = frame() {
+        frame.focused = focused;
+    }
+}
+
 /// Call at the start of every frame.
 pub fn frame_started() {
     if let Some(mut frame) = frame() {
-        frame.started = Some(Instant::now());
+        let now = Instant::now();
+        if let Some(report) = frame.stall_report.take() {
+            let seconds = frame.last_started.map_or(0, |last| now.duration_since(last).as_secs());
+            append(&report, &format!("\nThe window was drawn again after {seconds} s.\n"));
+        }
+        frame.last_started = Some(now);
+        frame.started = Some(now);
         frame.stuck = false;
         frame.report = None;
         "drawing the window".clone_into(&mut frame.activity);
@@ -123,6 +159,35 @@ fn check_frame() {
     }
 }
 
+/// A focused window is asked to redraw every second. If no frame follows for
+/// `STALL_REPORT_AFTER`, the event loop or the graphics driver is stuck and a report is written.
+fn check_stall() {
+    let Some(ctx) = CONTEXT.get() else { return };
+    let activity = {
+        let Some(frame) = frame() else { return };
+        if !frame.focused || frame.started.is_some() {
+            return;
+        }
+        let stalled = frame.last_started.is_some_and(|last| last.elapsed() >= STALL_REPORT_AFTER);
+        if !stalled || frame.stall_report.is_some() {
+            drop(frame);
+            ctx.request_repaint();
+            return;
+        }
+        frame.activity.clone()
+    };
+    let reason = format!(
+        "The window wasn't drawn for {} s while it had focus, although the app wasn't busy drawing. \
+         The graphics driver or the window system stopped answering. If the screen was off or \
+         locked at the time, this is expected.",
+        STALL_REPORT_AFTER.as_secs()
+    );
+    let report = write_report("stall", &reason, &activity);
+    if let Some(mut frame) = frame() {
+        frame.stall_report = report;
+    }
+}
+
 fn check_memory() {
     let Some(used) = resident_bytes() else { return };
     if used <= SOFT_MEMORY_LIMIT_BYTES {
@@ -166,6 +231,7 @@ fn report_text(reason: &str, activity: &str, seconds: u64) -> String {
         reason.to_owned(),
         format!("Time: {seconds} (seconds since 1970, UTC)"),
         format!("Doing: {activity}"),
+        format!("Graphics: {}", GRAPHICS.get().map_or("unknown", String::as_str)),
         format!("App memory: {} MB", resident_bytes().unwrap_or(0) / MIB),
         format!("Memory limit from the system: {}", if memory_cap::is_capped() { "yes" } else { "no" }),
     ];

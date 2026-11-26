@@ -47,6 +47,10 @@ pub const PROGRESS_BAR_WIDTH: f32 = 120.0;
 /// How often the window redraws while an operation reports progress.
 pub const PROGRESS_REPAINT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 
+/// Shortest time between two frames (about 60 per second). Frames are presented without vsync, so
+/// this is what keeps animations from redrawing as fast as the GPU allows. See `services/graphics.rs`.
+pub const MIN_FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_micros(16_667);
+
 /// How strongly selected diff lines are tinted with the selection colour.
 pub const DIFF_SELECTION_OPACITY: f32 = 0.45;
 /// Background strength of diff lines left out of the next commit.
@@ -81,3 +85,7 @@ pub const MAX_PREVIEW_SIDE: u32 = 2048;
 pub const CHECKER_SIZE: f32 = 8.0;
 /// Below this width the before and after images are shown one above the other.
 pub const IMAGE_DIFF_SIDE_BY_SIDE_WIDTH: f32 = 520.0;
+/// Space kept free to the right of a comment shown under a diff line.
+pub const DIFF_NOTE_MARGIN: f32 = 16.0;
+/// Comments under diff lines wrap at no fewer characters than this, however narrow the window.
+pub const DIFF_NOTE_MIN_COLUMNS: usize = 20;

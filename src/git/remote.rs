@@ -40,11 +40,23 @@ pub fn push(path: &Path, status: &BranchStatus, remote: Option<&str>) -> GitResu
     Ok(())
 }
 
+/// Pushes a branch whose history was rewritten (an amended, undone or rebased commit that was
+/// already pushed). `--force-with-lease` refuses if someone else pushed meanwhile.
+pub fn force_push(path: &Path) -> GitResult<()> {
+    run(path, &["push", "--progress", "--force-with-lease"])?;
+    Ok(())
+}
+
 /// Fetches a pull request's branch and returns the branch to switch to: the branch itself for a
 /// pull request from this repository, or `pr/<number>` for one from a fork.
 pub fn fetch_pull(path: &Path, remote: &str, pull: &PullRequest, local: &[String]) -> GitResult<Branch> {
-    let branch =
-        |name: String, is_remote: bool| Branch { name, is_remote, is_current: false, upstream: None };
+    let branch = |name: String, is_remote: bool| Branch {
+        name,
+        is_remote,
+        is_current: false,
+        upstream: None,
+        committed: None,
+    };
     if pull.same_repository {
         run(path, &["fetch", "--progress", remote, &pull.head_branch])?;
         return Ok(if local.contains(&pull.head_branch) {

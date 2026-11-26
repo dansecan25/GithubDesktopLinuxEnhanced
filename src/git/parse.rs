@@ -47,7 +47,10 @@ pub fn parse_status(output: &str) -> (BranchStatus, Vec<FileChange>) {
 fn apply_branch_header(status: &mut BranchStatus, header: &str) {
     let Some((key, value)) = header.split_once(' ') else { return };
     match key {
-        "branch.oid" => status.has_commits = value != "(initial)",
+        "branch.oid" => {
+            status.has_commits = value != "(initial)";
+            status.head_sha = status.has_commits.then(|| value.to_owned());
+        }
         "branch.head" => status.head = (value != "(detached)").then(|| value.to_owned()),
         "branch.upstream" => status.upstream = Some(value.to_owned()),
         "branch.ab" => {
@@ -133,7 +136,9 @@ pub fn parse_log(output: &str) -> Vec<CommitSummary> {
 
 /// The `--format` used by [`parse_branches`].
 pub fn branch_format() -> String {
-    format!("%(refname){FIELD_SEP}%(refname:short){FIELD_SEP}%(HEAD){FIELD_SEP}%(upstream:short)")
+    format!(
+        "%(refname){FIELD_SEP}%(refname:short){FIELD_SEP}%(HEAD){FIELD_SEP}%(upstream:short){FIELD_SEP}%(committerdate:unix)"
+    )
 }
 
 pub fn parse_branches(output: &str) -> Vec<Branch> {
@@ -145,6 +150,7 @@ pub fn parse_branches(output: &str) -> Vec<Branch> {
             let name = fields.next()?;
             let is_current = fields.next()? == "*";
             let upstream = fields.next().filter(|value| !value.is_empty()).map(str::to_owned);
+            let committed = fields.next().and_then(|value| value.parse().ok());
             // `refs/remotes/origin/HEAD` is a pointer, not a branch.
             if full_name.ends_with("/HEAD") {
                 return None;
@@ -154,6 +160,7 @@ pub fn parse_branches(output: &str) -> Vec<Branch> {
                 is_remote: full_name.starts_with("refs/remotes/"),
                 is_current,
                 upstream,
+                committed,
             })
         })
         .collect()
@@ -211,7 +218,7 @@ pub fn parse_diff(output: &str) -> Diff {
     let mut new_line = 0;
     let mut in_hunk = false;
 
-    for raw in text.lines() {
+    for (raw, crlf) in lines_with_endings(text) {
         if raw.starts_with("Binary files ") || raw == "GIT binary patch" {
             diff.is_binary = true;
         }
@@ -240,9 +247,20 @@ pub fn parse_diff(output: &str) -> Diff {
         };
         let (text, cut) = shorten_line(raw);
         diff.is_truncated |= cut;
-        diff.lines.push(DiffLine { kind, text, old_number, new_number });
+        diff.lines.push(DiffLine { kind, text, old_number, new_number, crlf });
     }
     diff
+}
+
+/// Lines without their ending, and whether the ending was `\r\n`.
+fn lines_with_endings(text: &str) -> impl Iterator<Item = (&str, bool)> {
+    text.split_inclusive('\n').map(|line| {
+        let line = line.strip_suffix('\n').unwrap_or(line);
+        match line.strip_suffix('\r') {
+            Some(line) => (line, true),
+            None => (line, false),
+        }
+    })
 }
 
 /// Returns the starting old and new line numbers of `@@ -a,b +c,d @@`.
@@ -258,14 +276,14 @@ fn parse_hunk_header(line: &str) -> Option<(u32, u32)> {
 pub fn diff_for_new_file(content: &str) -> Diff {
     let (text, mut is_truncated) = truncate_at_char_boundary(content, MAX_DIFF_BYTES);
     is_truncated |= text.lines().any(|line| line.len() > MAX_DIFF_LINE_BYTES);
-    let lines = text
-        .lines()
+    let lines = lines_with_endings(text)
         .zip(1..)
-        .map(|(line, number)| DiffLine {
+        .map(|((line, crlf), number)| DiffLine {
             kind: DiffLineKind::Added,
             text: format!("+{}", shorten_line(line).0),
             old_number: None,
             new_number: Some(number),
+            crlf,
         })
         .collect();
     Diff { lines, is_binary: false, is_truncated, image: None }
@@ -374,14 +392,16 @@ mod tests {
     fn branches_skip_remote_head_pointer() {
         let s = FIELD_SEP;
         let output = format!(
-            "refs/heads/main{s}main{s}*{s}origin/main\nrefs/remotes/origin/HEAD{s}origin{s} {s}\n\
-             refs/remotes/origin/dev{s}origin/dev{s} {s}\n"
+            "refs/heads/main{s}main{s}*{s}origin/main{s}1700000000\nrefs/remotes/origin/HEAD{s}origin{s} {s}{s}\n\
+             refs/remotes/origin/dev{s}origin/dev{s} {s}{s}\n"
         );
         let branches = parse_branches(&output);
         assert_eq!(branches.len(), 2);
         assert!(branches[0].is_current && !branches[0].is_remote);
         assert_eq!(branches[0].upstream.as_deref(), Some("origin/main"));
+        assert_eq!(branches[0].committed, Some(1_700_000_000));
         assert!(branches[1].is_remote);
+        assert_eq!(branches[1].committed, None);
     }
 
     #[test]
